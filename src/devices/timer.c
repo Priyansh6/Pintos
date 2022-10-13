@@ -4,6 +4,7 @@
 #include <round.h>
 #include <stdio.h>
 #include "devices/pit.h"
+#include "lib/kernel/list.h"
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -30,6 +31,8 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
+static struct list timer_list;
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -37,6 +40,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init (&timer_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -83,17 +87,34 @@ timer_elapsed (int64_t then)
 {
   return timer_ticks () - then;
 }
+/* Compares two struct timers, checking to see which has a
+   closer expiry */
+static bool 
+timer_compare(const struct list_elem *a, const struct list_elem *b, void *) {
+  struct timer *ta = list_entry (a, struct timer, elem);
+  struct timer *tb = list_entry (b, struct timer, elem);
+  return ta->expiry_tick < tb->expiry_tick;
+}
 
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
+  if (ticks >= 0) {
+    enum intr_level old_level;
+    old_level = intr_disable ();
 
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+    struct timer t = {
+      .thread = thread_current (),
+      .expiry_tick = timer_ticks () + ticks,
+    };
+
+    list_insert_ordered (&timer_list, &t.elem, timer_compare, NULL);
+    thread_block();
+
+    intr_set_level (old_level);
+  }
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -165,6 +186,7 @@ timer_print_stats (void)
 {
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
+
 
 /* Timer interrupt handler. */
 static void
@@ -172,6 +194,17 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  struct list_elem *e;
+
+  // Check threads for whether they are ready or not and change status to READY
+  for (e = list_begin (&timer_list); e != list_end (&timer_list); e = list_next(e)) {
+    struct timer *t = list_entry (e, struct timer, elem);
+    if (t->expiry_tick > timer_ticks ())
+      break;
+
+    thread_unblock (t->thread);
+    list_remove(e);
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

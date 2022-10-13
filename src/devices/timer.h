@@ -1,6 +1,8 @@
 #ifndef DEVICES_TIMER_H
 #define DEVICES_TIMER_H
 
+#include "threads/thread.h"
+#include "lib/kernel/list.h"
 #include <round.h>
 #include <stdint.h>
 
@@ -25,5 +27,13 @@ void timer_udelay (int64_t microseconds);
 void timer_ndelay (int64_t nanoseconds);
 
 void timer_print_stats (void);
+
+/* Used to keep track of waiting timers. */
+struct timer {
+  struct thread * thread;
+  int64_t expiry_tick;
+
+  struct list_elem elem;
+};
 
 #endif /* devices/timer.h */
