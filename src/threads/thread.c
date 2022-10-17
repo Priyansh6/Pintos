@@ -53,7 +53,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 
 /* Estimates the average number of threads
    ready to run over the past minute. */
-static int load_avg;            
+static fp load_avg;            
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
@@ -420,9 +420,9 @@ thread_set_priority (int new_priority)
 int
 thread_calculate_priority (struct thread *t) 
 {
-  int recent_cpu = t->recent_cpu;
+  fp recent_cpu = t->recent_cpu;
   int nice = t->nice;
-  return PRI_MAX - (recent_cpu / 4) - (nice * 2);
+  return PRI_MAX - (DIV_RC_BY_4(recent_cpu)) - (nice * 2);
 }
 
 /* Recalculates every thread's priority (4.4BSD Scheduler) */
@@ -468,28 +468,27 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  return 100 * load_avg;
+  return GET_100X_FP (load_avg);
 }
 
 /* Recalculates the system load average */
 void
 recalculate_load_avg (void) 
 {
-  load_avg = ((59 / 60) * load_avg) + ((1 / 60) * list_size (&ready_list));
+  load_avg = CALC_LA (load_avg, INT_TO_FP ((int) list_size (&ready_list)));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  return 100 * thread_current ()->recent_cpu;
+  return GET_100X_FP (thread_current ()->recent_cpu);
 }
 
 /* Recalculates the recent_cpu value for all threads */
 void
 all_threads_recalculate_recent_cpu (void)
 {
-  int coefficient = ((2 * load_avg) / ((2 * load_avg) + 1)); // TODO: int??
 
   // TODO: Check race conditions
   struct list_elem *e;
@@ -497,7 +496,7 @@ all_threads_recalculate_recent_cpu (void)
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
     {
       struct thread *t = list_entry (e, struct thread, elem);
-      t->recent_cpu =  coefficient * t->recent_cpu + t->nice;
+      t->recent_cpu = CALC_RECENT_CPU (t->recent_cpu, load_avg, t->nice);
     }
 }
 
@@ -505,7 +504,7 @@ all_threads_recalculate_recent_cpu (void)
 void
 thread_increment_recent_cpu (void)
 {
-  thread_current ()->recent_cpu++;
+  thread_current ()->recent_cpu = ADD_FP_INT (thread_current ()->recent_cpu, 1);
 }
 
 
@@ -598,7 +597,7 @@ init_thread (struct thread *t, const char *name, int priority, int parent_nice, 
 
   // TODO: Check if needs to be in interrupt disabled
   t->nice = parent_nice;
-  t->recent_cpu = parent_recent_cpu;
+  t->recent_cpu = INT_TO_FP (parent_recent_cpu);
   if (thread_mlfqs)
     t->priority = thread_calculate_priority (t);
   else 
