@@ -310,16 +310,16 @@ waiter_compare_priority (const struct list_elem *a, const struct list_elem *b, v
   struct semaphore_elem *sa = list_entry (a, struct semaphore_elem, elem);
   struct semaphore_elem *sb = list_entry (b, struct semaphore_elem, elem);
 
-  if (list_empty (sa->semaphore.waiters)) 
+  if (list_empty (&(sa->semaphore.waiters))) 
     return true;
-  if (list_empty (sb->semaphore.waiters))
+  if (list_empty (&(sb->semaphore.waiters)))
     return false;
 
-  struct list_elem *ma = list_max (sa->semaphore.waiters, thread_compare_priority, NULL); 
-  struct list_elem *mb = list_max (sb->semaphore.waiters, thread_compare_priority, NULL); 
+  struct list_elem *ma = list_max (&(sa->semaphore.waiters), thread_compare_priority, NULL); 
+  struct list_elem *mb = list_max (&(sb->semaphore.waiters), thread_compare_priority, NULL); 
 
-  struct thread *ta = list_entry (ma, thread, elem);
-  struct thread *tb = list_entry (mb, thread, elem);
+  struct thread *ta = list_entry (ma, struct thread, elem);
+  struct thread *tb = list_entry (mb, struct thread, elem);
 
   return ta->priority < tb->priority;
 }
