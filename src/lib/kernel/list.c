@@ -522,3 +522,12 @@ list_min (struct list *list, list_less_func *less, void *aux)
     }
   return min;
 }
+
+/* Remove maximum element from list. */
+struct list_elem *
+remove_list_max (struct list *list, list_less_func *less, void *aux)
+{
+  struct list_elem *e = list_max (list, less, aux);
+  list_remove (e);
+  return e;
+}
