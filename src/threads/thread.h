@@ -90,6 +90,8 @@ struct thread
     int priority;                       /* Base priority. */
     int effective_priority;             /* Effective priority. */
     struct list_elem allelem;           /* List element for all threads list. */
+    struct list_elem donee;             /* List element for a thread's list of donees. */
+    struct list donees;                 /* List tracking all donees for this thread. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
