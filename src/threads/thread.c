@@ -403,9 +403,20 @@ void
 thread_set_priority (int new_priority) 
 {
 
-  ASSERT (new_priority <= PRI_MAX && new_priority >= PRI_MIN);
+  int p = new_priority;
 
-  thread_current ()->priority = new_priority;
+  if (new_priority > PRI_MAX) {
+    printf("priority=%d\n", new_priority);
+    p = PRI_MAX;
+  }
+  else if (new_priority < PRI_MIN) {
+    printf("priority=%d\n", new_priority);
+    p = PRI_MIN;
+  }
+
+  ASSERT (p <= PRI_MAX && p >= PRI_MIN);
+
+  thread_current ()->priority = p;
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -413,7 +424,7 @@ thread_set_priority (int new_priority)
   struct list_elem *e = list_max (&ready_list, thread_compare_priority, NULL);
   struct thread *m = list_entry (e, struct thread, elem);
 
-  if (m->priority > new_priority) 
+  if (m->priority > p) 
     thread_yield ();
 
   intr_set_level (old_level);
@@ -423,9 +434,7 @@ thread_set_priority (int new_priority)
 int
 thread_calculate_priority (struct thread *t) 
 {
-  fp recent_cpu = t->recent_cpu;
-  int nice = t->nice;
-  return PRI_MAX - (DIV_RC_BY_4(recent_cpu)) - (nice * 2);
+  return PRI_MAX - (DIV_RC_BY_4(t->recent_cpu)) - (t->nice * 2);
 }
 
 /* Recalculates every thread's priority (4.4BSD Scheduler) */
@@ -433,6 +442,10 @@ void
 all_threads_recalculate_priority (void) 
 {
   // TODO: Check race conditions and only update if necessary
+
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
   struct list_elem *e;
 
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
@@ -440,6 +453,8 @@ all_threads_recalculate_priority (void)
       struct thread *t = list_entry (e, struct thread, elem);
       t->priority = thread_calculate_priority (t); // TODO: what if current thread no longer has highest priority?
     }
+
+  intr_set_level (old_level);
 }
 
 
@@ -447,6 +462,11 @@ all_threads_recalculate_priority (void)
 int
 thread_get_priority (void) 
 {
+  enum intr_level old_level;
+  old_level = intr_disable ();
+  int priority = thread_current ()->priority;
+  intr_set_level (old_level);
+  return priority;
   return thread_current ()->priority;
 }
 
@@ -456,43 +476,64 @@ thread_set_nice (int new_nice)
 {
   ASSERT (new_nice <= NICE_MAX && new_nice >= -NICE_MIN);
 
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
   thread_current ()->nice = new_nice;
   thread_set_priority (thread_calculate_priority (thread_current ()));
+
+  intr_set_level (old_level);
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  return thread_current ()->nice;
+  enum intr_level old_level;
+  old_level = intr_disable ();
+  int nice = thread_current ()->nice;
+  intr_set_level (old_level);
+  return nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  return GET_100X_FP (load_avg);
+  enum intr_level old_level;
+  old_level = intr_disable ();
+  int la = GET_100X_FP (load_avg);
+  intr_set_level (old_level);
+  return la;
 }
 
 /* Recalculates the system load average */
 void
 recalculate_load_avg (void) 
 {
+  enum intr_level old_level;
+  old_level = intr_disable ();
   load_avg = CALC_LA (load_avg, INT_TO_FP ((int) list_size (&ready_list)));
+  intr_set_level (old_level);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  return GET_100X_FP (thread_current ()->recent_cpu);
+  enum intr_level old_level;
+  old_level = intr_disable ();
+  int recent_cpu = GET_100X_FP (thread_current ()->recent_cpu);
+  intr_set_level (old_level);
+  return recent_cpu;
 }
 
 /* Recalculates the recent_cpu value for all threads */
 void
 all_threads_recalculate_recent_cpu (void)
 {
-
+  enum intr_level old_level;
+  old_level = intr_disable ();
   // TODO: Check race conditions
   struct list_elem *e;
 
@@ -501,13 +542,17 @@ all_threads_recalculate_recent_cpu (void)
       struct thread *t = list_entry (e, struct thread, elem);
       t->recent_cpu = CALC_RECENT_CPU (t->recent_cpu, load_avg, t->nice);
     }
+  intr_set_level (old_level);
 }
 
 /* Increments the currently running thread's recent_cpu */
 void
 thread_increment_recent_cpu (void)
 {
+  enum intr_level old_level;
+  old_level = intr_disable ();
   thread_current ()->recent_cpu = ADD_FP_INT (thread_current ()->recent_cpu, 1);
+  intr_set_level (old_level);
 }
 
 
