@@ -54,15 +54,26 @@ typedef union fp {
 #define SUB_FP_INT(x, n) (fp) ((x.num) - INT_TO_FP(n))
 
 //multiply two floating point numbers --- x * y
-#define MUL_FP(x, y) (fp) (((int64_t) x.num) * y.num / f)
+#define MUL_FP(x, y) (fp) (int32_t) (((int64_t) x.num) * y.num / f)
 
 //mulitply x (fp) by n (int) --- x * n
 #define MUL_FP_INT(x, n) (fp) ((x.num) * n)
 
 //divide x (fp) by y (fp) --- x / y
-#define DIV_FP(x, y) (fp) (((int64_t) x.num) * f / y.num)
+#define DIV_FP(x, y) (fp) (int32_t) (((int64_t) x.num) * f / y.num)
 
 //divide x (fp) by n (int) --- x / n
 #define DIV_FP_INT(x, n) (fp) (x.num / n)
 
+//load average coef = 59/60
+#define LA_COEF (fp) (DIV_FP_INT(INT_TO_FP(59), 60))
+
+//ready threads coef = 1/60
+#define RT_COEF (fp) (DIV_FP_INT(INT_TO_FP(1), 60))
+
+//calculate load average
+#define CALC_LA (la, rt) (fp) (FP_TO_INT(MUL_FP((LA_COEF, (la)), (RT_COEF, (rt)))))
+
+//calculate recent cpu
+#define CALC_RECENT_CPU (rc, la, nice) (fp) (ADD_FP_INT(MUL_FP(DIV_FP(MUL_FP_INT((la), 2), ADD_FP_INT(MUL_FP_INT((la), 2), 1)), (rc))), (nice))
 #endif
