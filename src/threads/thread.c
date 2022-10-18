@@ -217,8 +217,11 @@ thread_create (const char *name, int priority,
 
   /* Get the nice and recent_cpu values of the thread
      creating a new thread (the parent thread) */
+     
   int parent_nice = thread_get_nice ();
+  printf("parent nice = %d\n", parent_nice);
   int parent_recent_cpu = thread_get_recent_cpu ();
+  printf("parent recent_cpu = %d\n", parent_recent_cpu);
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
@@ -406,11 +409,11 @@ thread_set_priority (int new_priority)
   int p = new_priority;
 
   if (new_priority > PRI_MAX) {
-    printf("priority=%d\n", new_priority);
+    //printf("priority=%d\n", new_priority);
     p = PRI_MAX;
   }
   else if (new_priority < PRI_MIN) {
-    printf("priority=%d\n", new_priority);
+    //printf("priority=%d\n", new_priority);
     p = PRI_MIN;
   }
 
@@ -462,11 +465,6 @@ all_threads_recalculate_priority (void)
 int
 thread_get_priority (void) 
 {
-  enum intr_level old_level;
-  old_level = intr_disable ();
-  int priority = thread_current ()->priority;
-  intr_set_level (old_level);
-  return priority;
   return thread_current ()->priority;
 }
 
@@ -489,17 +487,15 @@ thread_set_nice (int new_nice)
 int
 thread_get_nice (void) 
 {
-  enum intr_level old_level;
-  old_level = intr_disable ();
-  int nice = thread_current ()->nice;
-  intr_set_level (old_level);
-  return nice;
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
+  return GET_100X_FP (load_avg);
+
   enum intr_level old_level;
   old_level = intr_disable ();
   int la = GET_100X_FP (load_avg);
@@ -521,11 +517,7 @@ recalculate_load_avg (void)
 int
 thread_get_recent_cpu (void) 
 {
-  enum intr_level old_level;
-  old_level = intr_disable ();
-  int recent_cpu = GET_100X_FP (thread_current ()->recent_cpu);
-  intr_set_level (old_level);
-  return recent_cpu;
+  return GET_100X_FP (thread_current ()->recent_cpu);
 }
 
 /* Recalculates the recent_cpu value for all threads */
@@ -645,8 +637,8 @@ init_thread (struct thread *t, const char *name, int priority, int parent_nice, 
 
   // TODO: Check if needs to be in interrupt disabled
   t->nice = parent_nice;
-  t->recent_cpu = INT_TO_FP (parent_recent_cpu);
-  if (thread_mlfqs)
+  t->recent_cpu = ( DIV_FP_INT(parent_recent_cpu, 100));
+  if (thread_mlfqs && strcmp(name, "idle"))
     t->priority = thread_calculate_priority (t);
   else 
     t->priority = priority;
