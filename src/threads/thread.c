@@ -241,10 +241,11 @@ thread_block (void)
 
 /* Comparison function for threads based on priority. */
 bool
-thread_compare_priority(const struct list_elem *a, const struct list_elem *b, void *) {
+thread_compare_priority (const struct list_elem *a, const struct list_elem *b, void *)
+{
   struct thread *ta = list_entry (a, struct thread, elem);
   struct thread *tb = list_entry (b, struct thread, elem);
-  return ta->priority < tb->priority;
+  return ta->effective_priority < tb->effective_priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -363,7 +364,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  struct thread *t = thread_current();
+  t->priority = new_priority;
+  t->effective_priority = t->effective_priority < new_priority ? new_priority : t->effective_priority;
 
   enum intr_level old_level;
   old_level = intr_disable ();

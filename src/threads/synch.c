@@ -184,6 +184,20 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
+static void
+propagate_effective_priority (struct thread *t, int effective_priority)
+{
+  t->effective_priority = t->effective_priority < effective_priority ? effective_priority : t->effective_priority;
+  if (!list_empty (&t->donees)) {
+      struct list_elem *e;
+      for (e = list_begin (&t->donees); e != list_end (&t->donees); e = list_next (e))
+      {
+        struct thread *child = list_entry (e, struct thread, donee);
+        propagate_effective_priority (child, effective_priority);
+      }
+    }
+}
+
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -198,6 +212,11 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
+
+  if (thread_current ()->effective_priority > lock->holder->effective_priority) {
+    propagate_effective_priority (lock->holder, thread_current ()->effective_priority);
+  }
+  list_push_back (&thread_current ()->donees, &lock->holder->donee);
 
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
@@ -234,6 +253,7 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
