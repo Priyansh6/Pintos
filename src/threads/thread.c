@@ -103,6 +103,8 @@ thread_init (void)
   list_init (&ready_list);
   list_init (&all_list);
 
+  load_avg = INT_TO_FP(0);
+
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT, 0, 0);
@@ -522,7 +524,7 @@ all_threads_recalculate_recent_cpu (void)
   // TODO: Check race conditions
   struct list_elem *e;
 
-  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
+  for (e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next(e))
     {
       struct thread *t = list_entry (e, struct thread, elem);
 
