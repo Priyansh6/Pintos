@@ -159,6 +159,7 @@ thread_tick (void)
      4.4BSD Scheduler */
   if (thread_mlfqs)
     {
+       
       /* Executes once per second */
       if (timer_ticks () % TIMER_FREQ == 0) 
         {
@@ -167,14 +168,9 @@ thread_tick (void)
           all_threads_recalculate_recent_cpu ();
         }
 
-      /* Executes once every four clock ticks */
-      if (timer_ticks () % 4 == 0)
-        {
-          all_threads_recalculate_priority ();
-        }
-
       if (t != idle_thread)
         thread_increment_recent_cpu ();
+
     }
 
 }
@@ -219,9 +215,7 @@ thread_create (const char *name, int priority,
      creating a new thread (the parent thread) */
      
   int parent_nice = thread_get_nice ();
-  printf("parent nice = %d\n", parent_nice);
   int parent_recent_cpu = thread_get_recent_cpu ();
-  printf("parent recent_cpu = %d\n", parent_recent_cpu);
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
@@ -310,6 +304,7 @@ thread_unblock (struct thread *t)
   t->status = THREAD_READY;
 
   intr_set_level (old_level);
+
 }
 
 /* Returns the name of the running thread. */
@@ -406,20 +401,9 @@ void
 thread_set_priority (int new_priority) 
 {
 
-  int p = new_priority;
+  ASSERT (new_priority <= PRI_MAX && new_priority >= PRI_MIN);
 
-  if (new_priority > PRI_MAX) {
-    //printf("priority=%d\n", new_priority);
-    p = PRI_MAX;
-  }
-  else if (new_priority < PRI_MIN) {
-    //printf("priority=%d\n", new_priority);
-    p = PRI_MIN;
-  }
-
-  ASSERT (p <= PRI_MAX && p >= PRI_MIN);
-
-  thread_current ()->priority = p;
+  thread_current ()->priority = new_priority;
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -427,7 +411,7 @@ thread_set_priority (int new_priority)
   struct list_elem *e = list_max (&ready_list, thread_compare_priority, NULL);
   struct thread *m = list_entry (e, struct thread, elem);
 
-  if (m->priority > p) 
+  if (m->priority > new_priority) 
     thread_yield ();
 
   intr_set_level (old_level);
@@ -437,7 +421,12 @@ thread_set_priority (int new_priority)
 int
 thread_calculate_priority (struct thread *t) 
 {
-  return PRI_MAX - (DIV_RC_BY_4(t->recent_cpu)) - (t->nice * 2);
+  int new_priority = PRI_MAX - (FP_TO_INT(t->recent_cpu) / 4) - (t->nice * 2);
+  if (new_priority > PRI_MAX)
+    return PRI_MAX;
+  if (new_priority < PRI_MIN)
+    return PRI_MIN;
+  return new_priority;
 }
 
 /* Recalculates every thread's priority (4.4BSD Scheduler) */
@@ -449,12 +438,16 @@ all_threads_recalculate_priority (void)
   enum intr_level old_level;
   old_level = intr_disable ();
 
+  //thread_set_priority (thread_calculate_priority (thread_current ()));
+
   struct list_elem *e;
 
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
     {
       struct thread *t = list_entry (e, struct thread, elem);
-      t->priority = thread_calculate_priority (t); // TODO: what if current thread no longer has highest priority?
+      if (strcmp(t->name, "idle") && strcmp(t->name, "thread_current ()->name")) {
+        t->priority = thread_calculate_priority (t);
+      }
     }
 
   intr_set_level (old_level);
@@ -472,7 +465,7 @@ thread_get_priority (void)
 void
 thread_set_nice (int new_nice) 
 {
-  ASSERT (new_nice <= NICE_MAX && new_nice >= -NICE_MIN);
+  ASSERT (new_nice <= NICE_MAX && new_nice >= NICE_MIN);
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -494,7 +487,6 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  return GET_100X_FP (load_avg);
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -509,7 +501,8 @@ recalculate_load_avg (void)
 {
   enum intr_level old_level;
   old_level = intr_disable ();
-  load_avg = CALC_LA (load_avg, INT_TO_FP ((int) list_size (&ready_list)));
+  int ready_count = list_size (&ready_list) + ((strcmp(thread_current()->name, "idle")) ? 1 : 0);
+  load_avg = CALC_LA (load_avg, INT_TO_FP (ready_count));
   intr_set_level (old_level);
 }
 
@@ -532,7 +525,11 @@ all_threads_recalculate_recent_cpu (void)
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
     {
       struct thread *t = list_entry (e, struct thread, elem);
-      t->recent_cpu = CALC_RECENT_CPU (t->recent_cpu, load_avg, t->nice);
+
+      fp a1 = RC_COEF(load_avg);
+      fp a2 = MUL_FP(a1, t->recent_cpu);
+      t->recent_cpu = a2;
+
     }
   intr_set_level (old_level);
 }
@@ -638,7 +635,7 @@ init_thread (struct thread *t, const char *name, int priority, int parent_nice, 
   // TODO: Check if needs to be in interrupt disabled
   t->nice = parent_nice;
   t->recent_cpu = ( DIV_FP_INT(parent_recent_cpu, 100));
-  if (thread_mlfqs && strcmp(name, "idle"))
+  if (thread_mlfqs && strcmp (name, "idle") && strcmp (name, "main"))
     t->priority = thread_calculate_priority (t);
   else 
     t->priority = priority;
@@ -734,6 +731,9 @@ thread_schedule_tail (struct thread *prev)
 static void
 schedule (void) 
 {
+
+  all_threads_recalculate_priority ();
+
   struct thread *cur = running_thread ();
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;
