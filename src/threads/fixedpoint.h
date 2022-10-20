@@ -3,88 +3,54 @@
 
 #include <stdint.h>
 
-/*      HOW TO USE EXAMPLE
-        int example = 23;
-        fp32_t x = INT_TO_FP(example);
-
-
-
-*/
-
-
 //we work in 17.14 format, as detailed in the spec
 #define FP_SIZE 31
 #define P 17
 #define Q FP_SIZE - P
 #define fp_f (1 << (Q))
 
-typedef union fp32_t {
-    int32_t num;
-    struct {
-        unsigned q    : Q;
-        signed p      : P;
-        unsigned sign : 1;
-    } parts;
-}fp32_t;
+typedef int32_t fp32_t;
 
-//convert integer to fixed point
+/* Convert integer to fixed point form. */
 #define INT_TO_FP(n) (fp32_t) ((n) * fp_f)
 
-//convert x to an integer (rounding towards 0)
-#define FP_TO_INT_ROUND_TO_ZERO(x) (int) ((((fp32_t) x).num) / fp_f)
+/* Convert x to an integer (round towards 0). */
+#define FP_TO_INT_ROUND_TO_ZERO(x) (int32_t) (((fp32_t) (x)) / fp_f)
 
-//convert x to an integer (rounding to nearest int)
-#define FP_TO_INT(x) (int) ((((fp32_t) (x)).num) >= 0 ? (((((fp32_t) x).num) + fp_f / 2) / fp_f) : (((((fp32_t) x).num) - fp_f / 2) / fp_f))
+/* Convert x to an integer (round towards nearest int). */
+#define FP_TO_INT(x) (int32_t) (((fp32_t) (x)) >= 0 ? ((((fp32_t) (x))) + fp_f / 2) / fp_f : ((((fp32_t) (x))) - fp_f / 2) / fp_f)
 
-//convert x to a float
-//FOR TESTING PURPOSES ONLY
-//DO NOT USE INSIDE KERNEL FUNCTION
-#define FP_TO_FLOAT(x) (float) ((((fp32_t) x).parts.p) + (float) (((fp32_t) x).parts.q) / fp_f)
+/* Adds two fixed point form integers. */
+#define ADD_FP(x, y) (fp32_t) ((fp32_t) (x) + (fp32_t) (y))
 
-//adds two fixed point numbers --- x + y
-#define ADD_FP(x, y) (fp32_t) ((((fp32_t) x).num) + (((fp32_t) y).num))
+/* Subtracts a fixed point form integer from a fixed point form integer. */
+#define SUB_FP(x, y) (fp32_t) ((fp32_t) (x) - (fp32_t) (y))
 
-//subtracts two fixed point numbers --- x - y
-#define SUB_FP(x, y) (fp32_t) ((((fp32_t) x).num) - (((fp32_t) y).num))
+/* Adds an integer to a fixed point integer */
+#define ADD_FP_INT(x, n) ADD_FP ((fp32_t) (x), INT_TO_FP (n))
 
-//adds x (fp32_t) with n (int) --- x + n * f
-#define ADD_FP_INT(x, n) (ADD_FP((((fp32_t) x).num), INT_TO_FP(n)))
+/* Subtract an integer from a fixed point integer */
+#define SUB_FP_INT(x, n) SUB_FP ((fp32_t) (x), INT_TO_FP (n))
 
-//subtracts n (int) from x (fp32_t) --- x - n * f
-#define SUB_FP_INT(x, n) (SUB_FP((((fp32_t) x).num), INT_TO_FP(n)))
+/* Multiplies two fixed point form integers. */
+#define MUL_FP(x, y) (fp32_t) (((int64_t) ((fp32_t) (x))) * ((fp32_t) (y)) / fp_f)
 
-//multiply two floating point numbers --- x * y
-#define MUL_FP(x, y) (fp32_t) (int32_t) (((int64_t) ((fp32_t) x).num) * ((fp32_t) y).num / fp_f)
+/* Multiplies a fixed point form integer by an integer. */
+#define MUL_FP_INT(x, n) (fp32_t) (((fp32_t) (x)) * n)
 
-//mulitply x (fp32_t) by n (int) --- x * n
-#define MUL_FP_INT(x, n) (fp32_t) ((((fp32_t) x).num) * n)
+/* Divides a fixed point form integer by another fixed point form integer. */
+#define DIV_FP(x, y) (fp32_t) (((int64_t) ((fp32_t) (x))) * fp_f / ((fp32_t) (y)))
 
-//divide x (fp32_t) by y (fp32_t) --- x / y
-#define DIV_FP(x, y) (fp32_t) (int32_t) (((int64_t) ((fp32_t) x).num) * fp_f / ((fp32_t) y).num)
+/* Divides a fixed point form integer by an integer. */
+#define DIV_FP_INT(x, n) (fp32_t) (((fp32_t) (x)) / n)
 
-//divide x (fp32_t) by n (int) --- x / n
-#define DIV_FP_INT(x, n) (fp32_t) (((fp32_t) x).num / n)
-
-//load average coef = 59/60
+/* Load average coefficient (59/60). */
 #define LA_COEF (fp32_t) 16110
 
-//ready threads coef = 1/60
+/* Ready threads coefficient (1/60). */
 #define RT_COEF (fp32_t) 273
 
-
-//calculate load average
-#define CALC_LA(la, rt) ( ADD_FP ( MUL_FP (LA_COEF, (la)), MUL_FP(RT_COEF, (rt)) ))
-
-#define RC_COEF(la) (fp32_t) (DIV_FP( MUL_FP_INT ((la), 2) , ADD_FP_INT(MUL_FP_INT ((la), 2), 1) ))
-
-//calculate recent cpu
-#define CALC_RECENT_CPU(rc, la, nice) ADD_FP_INT(MUL_FP(RC_COEF(la), (rc)), (nice))
-
-#define DIV_RC_BY_4(rc) (FP_TO_INT ( DIV_FP_INT (rc, 4 ) ))
-
+/* Multiplies a fixed point form integer by 100 and returns an integer. */
 #define GET_100X_FP(x) FP_TO_INT(MUL_FP_INT(x, 100))
 
-
 #endif
-
-

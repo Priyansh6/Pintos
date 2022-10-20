@@ -426,7 +426,7 @@ thread_set_priority (int new_priority)
 int
 thread_calculate_priority (struct thread *t) 
 {
-  int new_priority = PRI_MAX - (FP_TO_INT(t->recent_cpu) / 4) - (t->nice * 2);
+  int new_priority = PRI_MAX - FP_TO_INT (DIV_FP_INT (t->recent_cpu, 4)) - (t->nice * 2);
   if (new_priority > PRI_MAX)
     return PRI_MAX;
   if (new_priority < PRI_MIN)
@@ -502,11 +502,8 @@ thread_get_load_avg (void)
 void
 recalculate_load_avg (void) 
 {
-  enum intr_level old_level;
-  old_level = intr_disable ();
-  int ready_count = list_size (&ready_list) + ((strcmp(thread_current()->name, "idle")) ? 1 : 0);
-  load_avg = CALC_LA (load_avg, INT_TO_FP (ready_count));
-  intr_set_level (old_level);
+  int32_t ready_count = list_size (&ready_list) + ((strcmp(thread_current()->name, "idle")) ? 1 : 0);
+  load_avg = ADD_FP (MUL_FP (LA_COEF, (load_avg)), MUL_FP (RT_COEF, (INT_TO_FP (ready_count))));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
