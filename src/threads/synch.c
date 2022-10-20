@@ -202,16 +202,15 @@ lock_acquire (struct lock *lock)
   enum intr_level old_level = intr_disable ();
   if (lock->holder != NULL && thread_current ()->effective_priority > lock->holder->effective_priority)
     {
-      printf("lock 1");
       thread_current ()->donee = lock->holder;
       list_push_back (&lock->holder->donors, &thread_current ()->donor);
       
       struct thread *t = lock->holder;
-      do 
+      while (t)
         {
           t->effective_priority = t->effective_priority < thread_current ()->effective_priority ? thread_current ()->effective_priority : t->effective_priority;
           t = t->donee;
-        } while (t->donee);
+        } 
     }
 
   intr_set_level (old_level);
