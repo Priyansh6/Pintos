@@ -307,7 +307,6 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
-  t->priority = thread_calculate_priority (t);
 
   intr_set_level (old_level);
 
@@ -528,8 +527,7 @@ all_threads_recalculate_recent_cpu (void)
 
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
     {
-      struct thread *t = list_entry (e, struct thread, elem);
-
+      struct thread *t = list_entry (e, struct thread, allelem);
 
       fp32_t numerator = MUL_FP_INT (load_avg, 2);
       fp32_t denom = ADD_FP_INT (numerator, 1);
