@@ -365,19 +365,26 @@ void
 thread_set_priority (int new_priority) 
 {
   struct thread *t = thread_current();
-  t->priority = new_priority;
-  t->effective_priority = t->effective_priority < new_priority ? new_priority : t->effective_priority;
 
   enum intr_level old_level;
   old_level = intr_disable ();
 
+  t->priority = new_priority;
+  if (!list_empty (&t->donors)) 
+    {
+      t->effective_priority = t->effective_priority < new_priority ? new_priority : t->effective_priority;
+    } 
+  else 
+    {
+      t->effective_priority = new_priority;
+    }
+  
+  intr_set_level (old_level);
   struct list_elem *e = list_max (&ready_list, thread_compare_priority, NULL);
   struct thread *m = list_entry (e, struct thread, elem);
 
   if (m->priority > new_priority) 
     thread_yield ();
-
-  intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -506,7 +513,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->effective_priority = priority;
   t->magic = THREAD_MAGIC;
-  list_init (&t->donees);
+  list_init (&t->donors);
+  t->donee = NULL;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

@@ -91,8 +91,9 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
     int effective_priority;             /* Effective priority. */
-    struct list_elem donee;             /* List element for a thread's list of donees. */
-    struct list donees;                 /* List tracking all donees for this thread. */
+    struct thread *donee;               /* Pointer to thread that this thread is donating to */
+    struct list_elem donor;             /* List element for a thread's list of donors. */
+    struct list donors;                 /* List tracking all donors for this thread. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

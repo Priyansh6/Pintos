@@ -184,20 +184,6 @@ lock_init (struct lock *lock)
   sema_init (&lock->semaphore, 1);
 }
 
-static void
-propagate_effective_priority (struct thread *t, int effective_priority)
-{
-  t->effective_priority = t->effective_priority < effective_priority ? effective_priority : t->effective_priority;
-  if (!list_empty (&t->donees)) {
-      struct list_elem *e;
-      for (e = list_begin (&t->donees); e != list_end (&t->donees); e = list_next (e))
-      {
-        struct thread *child = list_entry (e, struct thread, donee);
-        propagate_effective_priority (child, effective_priority);
-      }
-    }
-}
-
 /* Acquires LOCK, sleeping until it becomes available if
    necessary.  The lock must not already be held by the current
    thread.
@@ -213,11 +199,22 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  if (thread_current ()->effective_priority > lock->holder->effective_priority) {
-    propagate_effective_priority (lock->holder, thread_current ()->effective_priority);
-  }
-  list_push_back (&thread_current ()->donees, &lock->holder->donee);
+  enum intr_level old_level = intr_disable ();
+  if (lock->holder != NULL && thread_current ()->effective_priority > lock->holder->effective_priority)
+    {
+      printf("lock 1");
+      thread_current ()->donee = lock->holder;
+      list_push_back (&lock->holder->donors, &thread_current ()->donor);
+      
+      struct thread *t = lock->holder;
+      do 
+        {
+          t->effective_priority = t->effective_priority < thread_current ()->effective_priority ? thread_current ()->effective_priority : t->effective_priority;
+          t = t->donee;
+        } while (t->donee);
+    }
 
+  intr_set_level (old_level);
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }
@@ -252,8 +249,22 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+  enum intr_level old_level = intr_disable ();
 
+  if (!list_empty(&lock->holder->donors)) 
+    {
+      struct list_elem *e;
+      for (e = list_begin (&lock->holder->donors); e != list_end (&lock->holder->donors); e = list_next (e))
+        {
+          struct thread *d = list_entry (e, struct thread, donor);
+          d->donee = NULL;
+          list_remove(e);
+        }
+
+      lock->holder->effective_priority = lock->holder->priority;
+    }
   
+  intr_set_level (old_level);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
