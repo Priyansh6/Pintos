@@ -53,7 +53,7 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 
 /* Estimates the average number of threads
    ready to run over the past minute. */
-static fp load_avg;            
+static fp32_t load_avg;            
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
@@ -161,17 +161,20 @@ thread_tick (void)
      4.4BSD Scheduler */
   if (thread_mlfqs)
     {
+
+      if (t != idle_thread)
+        thread_increment_recent_cpu ();
        
       /* Executes once per second */
       if (timer_ticks () % TIMER_FREQ == 0) 
         {
           // TODO: check order of these functions
-          recalculate_load_avg ();
+          
           all_threads_recalculate_recent_cpu ();
+          recalculate_load_avg ();
         }
 
-      if (t != idle_thread)
-        thread_increment_recent_cpu ();
+      
 
     }
 
@@ -304,6 +307,7 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
+  t->priority = thread_calculate_priority (t);
 
   intr_set_level (old_level);
 
@@ -440,14 +444,12 @@ all_threads_recalculate_priority (void)
   enum intr_level old_level;
   old_level = intr_disable ();
 
-  //thread_set_priority (thread_calculate_priority (thread_current ()));
-
   struct list_elem *e;
 
-  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
+  for (e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next(e))
     {
       struct thread *t = list_entry (e, struct thread, elem);
-      if (strcmp(t->name, "idle") && strcmp(t->name, "thread_current ()->name")) {
+      if (strcmp(t->name, "idle")) {
         t->priority = thread_calculate_priority (t);
       }
     }
@@ -524,13 +526,16 @@ all_threads_recalculate_recent_cpu (void)
   // TODO: Check race conditions
   struct list_elem *e;
 
-  for (e = list_begin (&ready_list); e != list_end (&ready_list); e = list_next(e))
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
     {
       struct thread *t = list_entry (e, struct thread, elem);
 
-      fp a1 = RC_COEF(load_avg);
-      fp a2 = MUL_FP(a1, t->recent_cpu);
-      t->recent_cpu = a2;
+
+      fp32_t numerator = MUL_FP_INT (load_avg, 2);
+      fp32_t denom = ADD_FP_INT (numerator, 1);
+      fp32_t frac = DIV_FP (numerator, denom);
+      frac = MUL_FP (frac, t->recent_cpu);
+      t->recent_cpu = ADD_FP_INT (frac, t->nice);
 
     }
   intr_set_level (old_level);
@@ -740,6 +745,7 @@ schedule (void)
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;
 
+  
   ASSERT (intr_get_level () == INTR_OFF);
   ASSERT (cur->status != THREAD_RUNNING);
   ASSERT (is_thread (next));
@@ -747,6 +753,7 @@ schedule (void)
   if (cur != next)
     prev = switch_threads (cur, next);
   thread_schedule_tail (prev);
+
 }
 
 /* Returns a tid to use for a new thread. */

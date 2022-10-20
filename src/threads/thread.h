@@ -93,7 +93,7 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     int nice;                           /* Niceness. */
-    fp recent_cpu;                     /* How much CPU time each thread receives */ // TODO: int???
+    fp32_t recent_cpu;                     /* How much CPU time each thread receives */ // TODO: int???
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
