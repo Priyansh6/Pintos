@@ -369,14 +369,14 @@ thread_set_priority (int new_priority)
 
   enum intr_level old_level;
   old_level = intr_disable ();
-  
+
   t->effective_priority = t->priority;
 
   if (!list_empty (&t->donors))
     {
       struct list_elem *max_donor = list_max(&t->donors, thread_compare_priority, NULL);
-      struct thread *max_thread = list_entry (max_donor, struct thread, donor);
-      t->effective_priority = t->effective_priority > max_thread->effective_priority ? t->effective_priority : max_thread->effective_priority;
+      struct thread *max_t = list_entry (max_donor, struct thread, donor);
+      t->effective_priority = t->effective_priority > max_t->effective_priority ? t->effective_priority : max_t->effective_priority;
     }
 
   intr_set_level (old_level);
