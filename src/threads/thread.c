@@ -365,25 +365,25 @@ void
 thread_set_priority (int new_priority) 
 {
   struct thread *t = thread_current();
+  t->priority = new_priority;
 
   enum intr_level old_level;
   old_level = intr_disable ();
-
-  t->priority = new_priority;
-  if (!list_empty (&t->donors)) 
-    {
-      t->effective_priority = t->effective_priority < new_priority ? new_priority : t->effective_priority;
-    } 
-  else 
-    {
-      t->effective_priority = new_priority;
-    }
   
+  t->effective_priority = t->priority;
+
+  if (!list_empty (&t->donors))
+    {
+      struct list_elem *max_donor = list_max(&t->donors, thread_compare_priority, NULL);
+      struct thread *max_thread = list_entry (max_donor, struct thread, donor);
+      t->effective_priority = t->effective_priority > max_thread->effective_priority ? t->effective_priority : max_thread->effective_priority;
+    }
+
   intr_set_level (old_level);
   struct list_elem *e = list_max (&ready_list, thread_compare_priority, NULL);
   struct thread *m = list_entry (e, struct thread, elem);
 
-  if (m->priority > new_priority) 
+  if (m->effective_priority > t->effective_priority) 
     thread_yield ();
 }
 
@@ -544,10 +544,8 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else {
-    struct list_elem *max = remove_list_max (&ready_list, thread_compare_priority, NULL);
-    return list_entry (max, struct thread, elem);
-  }
+  struct list_elem *max = remove_list_max (&ready_list, thread_compare_priority, NULL);
+  return list_entry (max, struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page

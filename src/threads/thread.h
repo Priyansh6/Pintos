@@ -93,7 +93,7 @@ struct thread
     int effective_priority;             /* Effective priority. */
     struct thread *donee;               /* Pointer to thread that this thread is donating to */
     struct list_elem donor;             /* List element for a thread's list of donors. */
-    struct list donors;                 /* List tracking all donors for this thread. */
+    struct list donors;                 /* List tracking all priority donors for this thread. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

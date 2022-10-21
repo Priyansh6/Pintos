@@ -198,22 +198,19 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
-
   enum intr_level old_level = intr_disable ();
-  if (lock->holder != NULL && thread_current ()->effective_priority > lock->holder->effective_priority)
+  if (lock->holder != NULL)
     {
-      printf("lock 1");
       thread_current ()->donee = lock->holder;
       list_push_back (&lock->holder->donors, &thread_current ()->donor);
       
       struct thread *t = lock->holder;
-      do 
+      while (t)
         {
           t->effective_priority = t->effective_priority < thread_current ()->effective_priority ? thread_current ()->effective_priority : t->effective_priority;
           t = t->donee;
-        } while (t->donee);
+        }
     }
-
   intr_set_level (old_level);
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
@@ -251,19 +248,35 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   enum intr_level old_level = intr_disable ();
 
-  if (!list_empty(&lock->holder->donors)) 
+  if (!list_empty(&lock->semaphore.waiters)) 
     {
-      struct list_elem *e;
-      for (e = list_begin (&lock->holder->donors); e != list_end (&lock->holder->donors); e = list_next (e))
-        {
-          struct thread *d = list_entry (e, struct thread, donor);
-          d->donee = NULL;
-          list_remove(e);
-        }
+      struct list_elem *max_waiter = list_max(&lock->semaphore.waiters, thread_compare_priority, NULL);
+      struct thread *max_thread = list_entry (max_waiter, struct thread, elem);
 
-      lock->holder->effective_priority = lock->holder->priority;
+      struct list_elem *e;
+      for (e = list_begin (&lock->semaphore.waiters); e != list_end (&lock->semaphore.waiters); e = list_next (e))
+        {         
+          struct thread *d = list_entry (e, struct thread, elem);
+          list_remove(&d->donor); 
+          if (d->tid != max_thread->tid)
+            {
+              list_push_back(&max_thread->donors, &d->donor);
+              d->donee = max_thread;
+            } else
+            {
+              d->donee = NULL;
+            }
+        }
+      if (!list_empty(&lock->holder->donors))
+        {
+          struct list_elem *max_donor = list_max(&lock->holder->donors, thread_compare_priority, NULL);
+          struct thread *max_donor_thread = list_entry (max_donor, struct thread, donor);
+          lock->holder->effective_priority = max_donor_thread->effective_priority;
+        } else
+        {
+          lock->holder->effective_priority = lock->holder->priority;
+        }
     }
-  
   intr_set_level (old_level);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
