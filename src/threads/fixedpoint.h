@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 
-//we work in 17.14 format, as detailed in the spec
 #define FP_SIZE 31
 #define P 17
 #define Q FP_SIZE - P
