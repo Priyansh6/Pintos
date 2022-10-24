@@ -204,14 +204,17 @@ lock_acquire (struct lock *lock)
 
   if (!thread_mlfqs)
     {
+      /* Disabling interrupts as lock->holder cannot be null at any point
+         during this if statement, causing a segmentation fault. */
       enum intr_level old_level = intr_disable ();
-      if (!thread_mlfqs && lock->holder != NULL)
+      if (lock->holder)
         {
           t->donee = lock->holder;
           list_push_back (&lock->holder->donors, &t->donor);
           
-          /* Iterating through the donees of the lock holder and setting effective
-            priority to the max of the donee thread, and the current thread. */
+          /* Iterating through the donees of the lock holder and setting
+             effective priority to the max of the donee thread, and the
+             current thread. */
           struct thread *d = lock->holder;
           while (d)
             {
@@ -255,55 +258,59 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-  if (!thread_mlfqs) 
+  if (!thread_mlfqs && !list_empty(&lock->semaphore.waiters)) 
     {
+      struct list_elem *e;
+      /* Disabling interrupts as threads can be added to semaphore.waiters
+          if a thread tries to aquire this lock while the list_max search 
+          is going on */
       enum intr_level old_level = intr_disable ();
+      /* Remove all donors associated with this lock from the lock 
+          holder's donor list. Also updates these donors' donee pointers 
+          to point to the new lock holder, as well as adding them to the 
+          donors list of the new lock holder. */
+      struct list_elem *max_waiter = list_max (&lock->semaphore.waiters, 
+                                                thread_compare_priority, 
+                                                NULL);
+      struct thread *max_thread = list_entry (max_waiter, struct thread, 
+                                              elem);
 
-      if (!list_empty(&lock->semaphore.waiters)) 
+      for (e = list_begin (&lock->semaphore.waiters); 
+            e != list_end (&lock->semaphore.waiters); 
+            e = list_next (e))
         {
-          /* Remove all donors associated with this lock from the lock 
-             holder's donor list. Also updates these donors' donee pointers 
-             to point to the new lock holder, as well as adding them to the 
-             donors list of the new lock holder. */
-          struct list_elem *max_waiter = list_max (&lock->semaphore.waiters, 
-                                                   thread_compare_priority, 
-                                                   NULL);
-          struct thread *max_thread = list_entry (max_waiter, struct thread, 
-                                                  elem);
-
-          struct list_elem *e;
-          for (e = list_begin (&lock->semaphore.waiters); 
-              e != list_end (&lock->semaphore.waiters); 
-              e = list_next (e))
+          struct thread *d = list_entry (e, struct thread, elem);
+          list_remove(&d->donor); 
+          if (d->tid != max_thread->tid)
             {
-              struct thread *d = list_entry (e, struct thread, elem);
-              list_remove(&d->donor); 
-              if (d->tid != max_thread->tid)
-                {
-                  list_push_back (&max_thread->donors, &d->donor);
-                  d->donee = max_thread;
-                } 
-              else
-                {
-                  d->donee = NULL;
-                }
-            }
-          /* Sets the thread releasing the lock's priority to the max of its 
-             base priority or the highest effective priority of its donors. */
-          lock->holder->priority = lock->holder->base_priority;
-          if (!list_empty(&lock->holder->donors))
+              list_push_back (&max_thread->donors, &d->donor);
+              d->donee = max_thread;
+            } 
+          else
             {
-              struct list_elem *max_donor = list_max (&lock->holder->donors, 
-                                                      thread_compare_priority, 
-                                                      NULL);
-              struct thread *max_d_thread = list_entry (max_donor, 
-                                                        struct thread, donor);
-              lock->holder->priority = MAX (max_d_thread->priority, 
-                                            lock->holder->priority);
+              d->donee = NULL;
             }
         }
-      
-      intr_set_level (old_level);
+      intr_set_level(old_level);
+
+      /* Sets the thread releasing the lock's priority to the max of its 
+          base priority or the highest effective priority of its donors. */
+      lock->holder->priority = lock->holder->base_priority;
+      if (!list_empty(&lock->holder->donors))
+        {
+          /* Disabling interupts as we search through the 
+              lock->holder->donors list as it is possible that 
+              another thread could donate to this. */
+          old_level = intr_disable ();
+          struct list_elem *max_donor = list_max (&lock->holder->donors, 
+                                                  thread_compare_priority, 
+                                                  NULL);
+          intr_set_level(old_level);
+          struct thread *max_d_thread = list_entry (max_donor, 
+                                                    struct thread, donor);
+          lock->holder->priority = MAX (max_d_thread->priority, 
+                                        lock->holder->priority);
+        }
     }
   lock->holder = NULL;
   sema_up (&lock->semaphore);

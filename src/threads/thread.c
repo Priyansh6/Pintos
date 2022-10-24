@@ -377,9 +377,13 @@ thread_set_priority (int new_priority)
          threads. */
       if (!list_empty (&t->donors))
         {
+          /* Disabling interrupts in case another thread donates priority
+             in the search through the donors list for the max priority. */
+          enum intr_level old_level = intr_disable ();
           struct list_elem *max_donor = list_max (&t->donors, 
                                                   thread_compare_priority, 
                                                   NULL);
+          intr_set_level(old_level);
           struct thread *max_thread = list_entry (max_donor, struct thread, 
                                                   donor);
           t->priority = MAX (t->priority, max_thread->priority);
