@@ -257,30 +257,44 @@ lock_release (struct lock *lock)
 
   if (!list_empty(&lock->semaphore.waiters)) 
     {
-      struct list_elem *max_waiter = list_max(&lock->semaphore.waiters, thread_compare_priority, NULL);
+      /* Remove all donors associated with this lock from the lock holder's 
+         donor list. Also updates these donors' donee pointers to point to
+         the new lock holder, as well as adding them to the donors list 
+         of the new lock holder. */
+      struct list_elem *max_waiter = list_max (&lock->semaphore.waiters, 
+                                               thread_compare_priority, NULL);
       struct thread *max_thread = list_entry (max_waiter, struct thread, elem);
 
       struct list_elem *e;
-      for (e = list_begin (&lock->semaphore.waiters); e != list_end (&lock->semaphore.waiters); e = list_next (e))
-        {         
+      for (e = list_begin (&lock->semaphore.waiters); 
+           e != list_end (&lock->semaphore.waiters); 
+           e = list_next (e))
+        {
           struct thread *d = list_entry (e, struct thread, elem);
           list_remove(&d->donor); 
           if (d->tid != max_thread->tid)
             {
-              list_push_back(&max_thread->donors, &d->donor);
+              list_push_back (&max_thread->donors, &d->donor);
               d->donee = max_thread;
-            } else
+            } 
+          else
             {
               d->donee = NULL;
             }
         }
-
+      /* Sets the thread releasing the lock's priority to the max of its base
+         priority or the highest effective priority of its donors. */
       lock->holder->effective_priority = lock->holder->priority;
       if (!list_empty(&lock->holder->donors))
         {
-          struct list_elem *max_donor = list_max(&lock->holder->donors, thread_compare_priority, NULL);
-          struct thread *max_donor_thread = list_entry (max_donor, struct thread, donor);
-          lock->holder->effective_priority = MAX (max_donor_thread->effective_priority, lock->holder->effective_priority);
+          struct list_elem *max_donor = list_max (&lock->holder->donors, 
+                                                  thread_compare_priority, 
+                                                  NULL);
+          struct thread *max_d_thread = list_entry (max_donor, 
+                                                    struct thread, donor);
+          lock->holder->effective_priority = MAX (
+                                             max_d_thread->effective_priority, 
+                                             lock->holder->effective_priority);
         }
     }
   
@@ -392,7 +406,8 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (lock_held_by_current_thread (lock));
 
   if (!list_empty (&cond->waiters)) 
-    sema_up (&list_entry (remove_list_max (&cond->waiters, waiter_compare_priority, NULL),
+    sema_up (&list_entry (remove_list_max (&cond->waiters, 
+                                           waiter_compare_priority, NULL),
                           struct semaphore_elem, elem)->semaphore);
 }
 
