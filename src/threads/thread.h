@@ -90,13 +90,16 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
-    int priority;                       /* Base priority. */
-    struct list_elem allelem;           /* List element for all threads list. */
+    int base_priority;                  /* Base priority. */
+    struct list_elem allelem;           /* List element for all threads list */
 
-    int effective_priority;             /* Effective priority. */
-    struct thread *donee;               /* Pointer to thread that this thread is donating priority to */
-    struct list_elem donor;             /* List element for a thread's list of donors. */
-    struct list donors;                 /* List tracking all priority donors for this thread. */
+    int priority;                       /* Effective priority. */
+    struct thread *donee;               /* Pointer to thread that this thread 
+                                           is donating priority to */
+    struct list_elem donor;             /* List element for a thread's list 
+                                           of donors. */
+    struct list donors;                 /* List tracking all priority donors 
+                                           for this thread. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -148,6 +151,7 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 /* Comparison function for threads based on priority. */
-bool thread_compare_priority(const struct list_elem *a, const struct list_elem *b, void *);
+bool thread_compare_priority (const struct list_elem *a, 
+                              const struct list_elem *b, void *);
 
 #endif /* threads/thread.h */

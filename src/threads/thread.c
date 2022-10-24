@@ -215,7 +215,7 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
-  if (t->priority > thread_get_priority ())
+  if (t->base_priority > thread_get_priority ())
     {
       thread_yield ();
     }
@@ -246,7 +246,7 @@ thread_compare_priority (const struct list_elem *a, const struct list_elem *b,
 {
   struct thread *ta = list_entry (a, struct thread, elem);
   struct thread *tb = list_entry (b, struct thread, elem);
-  return ta->effective_priority < tb->effective_priority;
+  return ta->priority < tb->priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -366,29 +366,30 @@ void
 thread_set_priority (int new_priority) 
 {
   struct thread *t = thread_current();
-  t->priority = new_priority;
-
-  enum intr_level old_level;
-  old_level = intr_disable ();
-
-  t->effective_priority = t->priority;
-
-  /* Setting the current threads effective priority to the max between its
-     effective priority and the highest priority of all of its donor threads */
-  if (!list_empty (&t->donors))
+  t->base_priority = new_priority;
+  
+  if (!thread_mlfqs) 
     {
-      struct list_elem *max_donor = list_max (&t->donors, 
-                                              thread_compare_priority, NULL);
-      struct thread *max_thread = list_entry (max_donor, struct thread, donor);
-      t->effective_priority = MAX (t->effective_priority, 
-                                   max_thread->effective_priority);
-    }
+      t->priority = t->base_priority;
 
-  intr_set_level (old_level);
+      /* Setting the current threads effective priority to the max between 
+         its effective priority and the highest priority of all of its donor 
+         threads. */
+      if (!list_empty (&t->donors))
+        {
+          struct list_elem *max_donor = list_max (&t->donors, 
+                                                  thread_compare_priority, 
+                                                  NULL);
+          struct thread *max_thread = list_entry (max_donor, struct thread, 
+                                                  donor);
+          t->priority = MAX (t->priority, max_thread->priority);
+        }
+    }
+  
   struct list_elem *e = list_max (&ready_list, thread_compare_priority, NULL);
   struct thread *m = list_entry (e, struct thread, elem);
 
-  if (m->effective_priority > t->effective_priority) 
+  if (m->priority > t->priority) 
     thread_yield ();
 }
 
@@ -396,7 +397,7 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void) 
 {
-  return thread_current ()->effective_priority;
+  return thread_current ()->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -515,8 +516,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
+  t->base_priority = priority;
   t->priority = priority;
-  t->effective_priority = priority;
   t->magic = THREAD_MAGIC;
   list_init (&t->donors);
   t->donee = NULL;
