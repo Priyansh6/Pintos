@@ -365,7 +365,7 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  struct thread *t = thread_current();
+  struct thread *t = thread_current ();
   t->base_priority = new_priority;
   
   if (!thread_mlfqs) 
@@ -383,7 +383,7 @@ thread_set_priority (int new_priority)
           struct list_elem *max_donor = list_max (&t->donors, 
                                                   thread_compare_priority, 
                                                   NULL);
-          intr_set_level(old_level);
+          intr_set_level (old_level);
           struct thread *max_thread = list_entry (max_donor, struct thread, 
                                                   donor);
           t->priority = MAX (t->priority, max_thread->priority);
