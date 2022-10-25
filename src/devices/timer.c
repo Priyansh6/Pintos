@@ -90,7 +90,7 @@ timer_elapsed (int64_t then)
 /* Compares two struct timers, checking to see which has a
    closer expiry */
 static bool 
-timer_compare(const struct list_elem *a, const struct list_elem *b, void *) {
+timer_compare(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
   struct timer *ta = list_entry (a, struct timer, elem);
   struct timer *tb = list_entry (b, struct timer, elem);
   return ta->expiry_tick < tb->expiry_tick;
