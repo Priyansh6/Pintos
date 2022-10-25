@@ -203,8 +203,14 @@ timer_interrupt (struct intr_frame *args UNUSED)
       break;
 
     thread_unblock (t->thread);
+
+    // TODO: Only call if unblocked thread is higher priority
+    // TODO: ask mark
+    intr_yield_on_return ();
+
     list_remove(e);
   }
+  
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
