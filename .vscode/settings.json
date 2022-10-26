@@ -1,5 +1,10 @@
 {
     "files.associations": {
-        "ratio": "c"
+        "ratio": "c",
+        "chrono": "c",
+        "random": "c",
+        "limits": "c",
+        "semaphore": "c",
+        "algorithm": "c"
     }
 }

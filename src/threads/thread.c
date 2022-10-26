@@ -162,17 +162,15 @@ thread_tick (void)
   if (thread_mlfqs)
     {
 
-      if (timer_ticks () % 4)
-        all_threads_recalculate_priority ();
-
       if (t != idle_thread)
         thread_increment_recent_cpu ();
        
       /* Executes once per second */
       if (timer_ticks () % TIMER_FREQ == 0) 
         {
-          all_threads_recalculate_recent_cpu ();
           recalculate_load_avg ();
+          all_threads_recalculate_recent_cpu ();
+          all_threads_recalculate_priority ();
         }
 
     }
@@ -407,11 +405,15 @@ thread_set_priority (int new_priority)
   ASSERT (new_priority <= PRI_MAX && new_priority >= PRI_MIN);
 
   struct thread *t = thread_current ();
-  t->base_priority = new_priority;
+
+  enum intr_level old_level = intr_disable ();
+ 
   t->priority = new_priority;
   
   if (!thread_mlfqs) 
     {
+       t->base_priority = new_priority;
+
       /* Setting the current threads effective priority to the max between 
          its effective priority and the highest priority of all of its donor 
          threads. */
@@ -419,26 +421,31 @@ thread_set_priority (int new_priority)
         {
           /* Disabling interrupts in case another thread donates priority
              in the search through the donors list for the max priority. */
-          enum intr_level old_level = intr_disable ();
+          
           struct list_elem *max_donor = list_max (&t->donors, 
                                                   thread_compare_priority, 
                                                   NULL);
-          intr_set_level (old_level);
+          
           struct thread *max_thread = list_entry (max_donor, struct thread, 
                                                   donor);
           t->priority = MAX (t->priority, max_thread->priority);
         }
+
+      intr_set_level (old_level);
     }
 
-  enum intr_level old_level;
-  old_level = intr_disable ();
   struct list_elem *e = list_max (&ready_list, thread_compare_priority, NULL);
-  intr_set_level (old_level);
-
   struct thread *m = list_entry (e, struct thread, elem);
 
   if (m->priority > t->priority) 
-    thread_yield ();
+  {
+    if (!intr_context ())
+      thread_yield ();
+    else 
+      intr_yield_on_return ();
+  }
+
+  intr_set_level (old_level);
 }
 
 /* Clips a value to ensure it falls between upper and lower. */
@@ -477,6 +484,12 @@ all_threads_recalculate_priority (void)
         t->priority = thread_calculate_priority (t);
       }
     }
+
+  e = list_max (&ready_list, thread_compare_priority, NULL);
+  struct thread *m = list_entry (e, struct thread, elem);
+
+  if (m->priority > thread_current ()->priority) 
+    intr_yield_on_return ();
 
   intr_set_level (old_level);
 }
@@ -558,6 +571,7 @@ void
 thread_increment_recent_cpu (void)
 {
   thread_current ()->recent_cpu = ADD_FP_INT (thread_current ()->recent_cpu, 1);
+  thread_set_priority (thread_calculate_priority (thread_current ()));
 }
 
 
@@ -653,7 +667,6 @@ init_thread (struct thread *t, const char *name, int priority, int parent_nice, 
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->base_priority = priority;
-  t->priority = priority;
   t->magic = THREAD_MAGIC;
   list_init (&t->donors);
   t->donee = NULL;
