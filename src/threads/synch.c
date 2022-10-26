@@ -112,17 +112,21 @@ sema_up (struct semaphore *sema)
 
   ASSERT (sema != NULL);
 
+  struct thread *max = NULL;
+
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)) 
     {
-      struct list_elem *max = remove_list_max (&sema->waiters, 
-                                               thread_compare_priority, 
-                                               NULL);
-      thread_unblock (list_entry (max, struct thread, elem));
+      max = list_entry (remove_list_max (&sema->waiters, thread_compare_priority, NULL), struct thread, elem);
+
+      thread_unblock (max);
     }
   sema->value++;
+  
+  if (max != NULL && max->priority > thread_current ()->priority)
+    thread_yield ();
+
   intr_set_level (old_level);
-  thread_yield ();
 }
 
 static void sema_test_helper (void *sema_);
@@ -225,7 +229,7 @@ lock_acquire (struct lock *lock)
       intr_set_level (old_level);
     }
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  lock->holder = t;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -385,6 +389,9 @@ cond_wait (struct condition *cond, struct lock *lock)
 static bool
 waiter_compare_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
+
+  ASSERT (intr_get_level () == INTR_OFF);
+
   struct semaphore_elem *sa = list_entry (a, struct semaphore_elem, elem);
   struct semaphore_elem *sb = list_entry (b, struct semaphore_elem, elem);
 
@@ -399,7 +406,7 @@ waiter_compare_priority (const struct list_elem *a, const struct list_elem *b, v
   struct thread *ta = list_entry (ma, struct thread, elem);
   struct thread *tb = list_entry (mb, struct thread, elem);
 
-  return ta->base_priority < tb->base_priority;
+  return ta->priority < tb->priority;
 }
 
 
@@ -418,10 +425,12 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
+  enum intr_level old_level = intr_disable ();
   if (!list_empty (&cond->waiters)) 
     sema_up (&list_entry (remove_list_max (&cond->waiters, 
                                            waiter_compare_priority, NULL),
                           struct semaphore_elem, elem)->semaphore);
+  intr_set_level (old_level);
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
