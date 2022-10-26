@@ -262,13 +262,16 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+
+  enum intr_level old_level = intr_disable ();
+
   if (!thread_mlfqs && !list_empty(&lock->semaphore.waiters)) 
     {
       struct list_elem *e;
       /* Disabling interrupts as threads can be added to semaphore.waiters
           if a thread tries to aquire this lock while the list_max search 
           is going on */
-      enum intr_level old_level = intr_disable ();
+      
       /* Remove all donors associated with this lock from the lock 
           holder's donor list. Also updates these donors' donee pointers 
           to point to the new lock holder, as well as adding them to the 
@@ -295,8 +298,7 @@ lock_release (struct lock *lock)
               d->donee = NULL;
             }
         }
-      intr_set_level(old_level);
-
+      
       /* Sets the thread releasing the lock's priority to the max of its 
           base priority or the highest effective priority of its donors. */
       lock->holder->priority = lock->holder->base_priority;
@@ -318,6 +320,7 @@ lock_release (struct lock *lock)
     }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+  intr_set_level(old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false

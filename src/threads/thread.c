@@ -405,15 +405,15 @@ thread_set_priority (int new_priority)
   ASSERT (new_priority <= PRI_MAX && new_priority >= PRI_MIN);
 
   struct thread *t = thread_current ();
+
+  enum intr_level old_level = intr_disable ();
  
   t->priority = new_priority;
   
   if (!thread_mlfqs) 
     {
-
        t->base_priority = new_priority;
 
-       enum intr_level old_level = intr_disable ();
       /* Setting the current threads effective priority to the max between 
          its effective priority and the highest priority of all of its donor 
          threads. */
@@ -434,11 +434,7 @@ thread_set_priority (int new_priority)
       intr_set_level (old_level);
     }
 
-  enum intr_level old_level;
-  old_level = intr_disable ();
   struct list_elem *e = list_max (&ready_list, thread_compare_priority, NULL);
-  
-
   struct thread *m = list_entry (e, struct thread, elem);
 
   if (m->priority > t->priority) 
