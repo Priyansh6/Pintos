@@ -206,27 +206,26 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
   struct thread *t = thread_current ();
 
-  if (!thread_mlfqs)
+  if (!thread_mlfqs && lock->holder)
     {
-      /* Disabling interrupts as lock->holder cannot be null at any point
-         during this if statement, causing a segmentation fault. */
-      enum intr_level old_level = intr_disable ();
-      if (lock->holder)
+  /* Disabling interrupts as lock->holder cannot be null at any point
+      during this if statement, causing a segmentation fault. */
+      //enum intr_level old_level = intr_disable ();
+      sema_down(&lock->holder->locksema);
+      t->donee = lock->holder;
+      list_push_back (&lock->holder->donors, &t->donor);
+      
+      /* Iterating through the donees of the lock holder and setting
+          effective priority to the max of the donee thread, and the
+          current thread. */
+      struct thread *d = lock->holder;
+      while (d)
         {
-          t->donee = lock->holder;
-          list_push_back (&lock->holder->donors, &t->donor);
-          
-          /* Iterating through the donees of the lock holder and setting
-             effective priority to the max of the donee thread, and the
-             current thread. */
-          struct thread *d = lock->holder;
-          while (d)
-            {
-              d->priority = MAX (d->priority, t->priority);
-              d = d->donee;
-            }
+          d->priority = MAX (d->priority, t->priority);
+          d = d->donee;
         }
-      intr_set_level (old_level);
+      sema_up(&lock->holder->locksema);
+      //intr_set_level (old_level);
     }
   sema_down (&lock->semaphore);
   lock->holder = t;
@@ -263,7 +262,8 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  enum intr_level old_level = intr_disable ();
+  //enum intr_level old_level = intr_disable ();
+  sema_down(&thread_current()->locksema);
 
   if (!thread_mlfqs && !list_empty(&lock->semaphore.waiters)) 
     {
@@ -307,11 +307,9 @@ lock_release (struct lock *lock)
           /* Disabling interupts as we search through the 
               lock->holder->donors list as it is possible that 
               another thread could donate to this. */
-          old_level = intr_disable ();
           struct list_elem *max_donor = list_max (&lock->holder->donors, 
                                                   thread_compare_priority, 
                                                   NULL);
-          intr_set_level(old_level);
           struct thread *max_d_thread = list_entry (max_donor, 
                                                     struct thread, donor);
           lock->holder->priority = MAX (max_d_thread->priority, 
@@ -320,7 +318,8 @@ lock_release (struct lock *lock)
     }
   lock->holder = NULL;
   sema_up (&lock->semaphore);
-  intr_set_level(old_level);
+  //intr_set_level(old_level);
+  sema_up(&thread_current()->locksema);
 }
 
 /* Returns true if the current thread holds LOCK, false

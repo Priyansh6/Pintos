@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "fixedpoint.h"
+#include "synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -106,6 +107,8 @@ struct thread
                                            of donors. */
     struct list donors;                 /* List tracking all priority donors 
                                            for this thread. */
+
+    struct semaphore locksema;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
