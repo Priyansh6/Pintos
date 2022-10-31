@@ -22,4 +22,4 @@
 *.vrb
 *.nav
 *.toc
-
+.vscode/
