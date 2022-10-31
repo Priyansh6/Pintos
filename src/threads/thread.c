@@ -80,6 +80,7 @@ static void thread_increment_recent_cpu (void);
 static void recalculate_load_avg (void);
 static int thread_calculate_priority (struct thread *t);
 static void all_threads_recalculate_priority (void);
+static void thread_recalculate_recent_cpu (struct thread *t, void *aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -161,7 +162,6 @@ thread_tick (void)
      4.4BSD Scheduler */
   if (thread_mlfqs)
     {
-
       if (t != idle_thread)
         thread_increment_recent_cpu ();
        
@@ -172,7 +172,6 @@ thread_tick (void)
           all_threads_recalculate_recent_cpu ();
           all_threads_recalculate_priority ();
         }
-
     }
 
 }
@@ -252,9 +251,7 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
   if (t->priority > thread_get_priority ())
-    {
-      thread_yield ();
-    }
+    thread_yield ();
 
   return tid;
 }
@@ -546,23 +543,23 @@ thread_get_recent_cpu (void)
   return GET_100X_FP (thread_current ()->recent_cpu);
 }
 
+/* Recalculate recent_cpu for a given thread t */
+void 
+thread_recalculate_recent_cpu (struct thread *t, void *aux UNUSED) 
+{
+  fp32_t numerator = MUL_FP_INT (load_avg, 2);
+  fp32_t recent_cpu_coef = DIV_FP (numerator, ADD_FP_INT (numerator, 1));
+  fp32_t recent_cpu_adj = MUL_FP (recent_cpu_coef, t->recent_cpu);
+  t->recent_cpu = ADD_FP_INT (recent_cpu_adj, t->nice);
+}
+
 /* Recalculates the recent_cpu value for all threads */
 void
 all_threads_recalculate_recent_cpu (void)
 {
   enum intr_level old_level;
   old_level = intr_disable ();
-  struct list_elem *e;
-
-  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next(e))
-    {
-      struct thread *t = list_entry (e, struct thread, allelem);
-
-      fp32_t numerator = MUL_FP_INT (load_avg, 2);
-      fp32_t recent_cpu_coef = DIV_FP (numerator, ADD_FP_INT (numerator, 1));
-      fp32_t recent_cpu_adj = MUL_FP (recent_cpu_coef, t->recent_cpu);
-      t->recent_cpu = ADD_FP_INT (recent_cpu_adj, t->nice);
-    }
+  thread_foreach(&thread_recalculate_recent_cpu, NULL);
   intr_set_level (old_level);
 }
 

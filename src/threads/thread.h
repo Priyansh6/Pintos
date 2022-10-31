@@ -25,7 +25,7 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
-//Custom MAX function for finding the max between two integers
+/* Custom MAX function for finding the max between two integers. */
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 
 #define NICE_MIN -20
@@ -94,19 +94,15 @@ struct thread
     enum thread_status status;          /* Thread state. */
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
+    int priority;                       /* Effective priority. */
     int base_priority;                  /* Base priority. */
     int nice;                           /* Niceness. */
-    fp32_t recent_cpu;                     /* How much CPU time each thread receives */ // TODO: int???
+    fp32_t recent_cpu;                  /* How much CPU time each thread receives */
     struct list_elem allelem;           /* List element for all threads list */
-
-    int priority;                       /* Effective priority. */
-    struct thread *donee;               /* Pointer to thread that this thread 
-                                           is donating priority to */
-    struct list_elem donor;             /* List element for a thread's list 
-                                           of donors. */
-    struct list donors;                 /* List tracking all priority donors 
-                                           for this thread. */
-
+    struct thread *donee;               /* Pointer to thread that this thread is donating priority to */
+    struct list_elem donor;             /* List element for a thread's list of donors. */
+    struct list donors;                 /* List tracking all priority donors for this thread. */
+    
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
