@@ -121,11 +121,15 @@ sema_up (struct semaphore *sema)
       thread_unblock (max);
     }
   sema->value++;
-  
-  if (max != NULL && max->priority > thread_current ()->priority)
-    thread_yield ();
-
   intr_set_level (old_level);
+  
+  if (max != NULL && max->priority > thread_current ()->priority) {
+    if (!intr_context ())
+      thread_yield ();
+    else 
+      intr_yield_on_return ();
+  }
+
 }
 
 static void sema_test_helper (void *sema_);
