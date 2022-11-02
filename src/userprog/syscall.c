@@ -13,12 +13,12 @@ static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
 static void syscall_handlers_init (void);
 
-static void exit (void);
-static void write (void);
+static void exit (struct intr_frame *f);
+static void write (struct intr_frame *f);
 
 static struct lock fs_lock;
 
-static void (*syscall_ptrs[N_TASK_ONE_SYSCALLS]) (void);
+static void (*syscall_ptrs[N_TASK_ONE_SYSCALLS]) (struct intr_frame *f);
 
 void
 syscall_init (void) 
@@ -53,7 +53,7 @@ syscall_handler (struct intr_frame *f)
   void (*fp) (void) = syscall_ptrs[(int) f->esp];
   if (fp)
   {
-    fp ();
+    fp (f);
   } else {
     printf ("Unimplemented syscall!\n");
     thread_exit ();
@@ -67,13 +67,12 @@ is_valid_user_ptr (void *uaddr)
 }
 
 static void 
-exit (void) 
+exit (struct intr_frame *f) 
 {
-
 }
 
 static void 
-write (void)
+write (struct intr_frame *f)
 {
 
 }
