@@ -50,7 +50,7 @@ static void
 syscall_handler (struct intr_frame *f) 
 {
   /* Do we need validation here to prevent syscalls outside the range of the syscall array? */
-  void (*fp) (void) = syscall_ptrs[(int) f->esp];
+  void (*fp) (struct intr_frame *) = syscall_ptrs[(int) f->esp];
   if (fp)
   {
     fp (f);
