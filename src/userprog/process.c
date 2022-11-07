@@ -85,12 +85,36 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (args[0], &if_.eip, &if_.esp);
+
+  /* Push passed arguments to the stack. */
   
+  
+  char *stack_top = if_.esp;
+  char *last_arg_end = if_.esp;
+
   /* We have pushed the arguments onto the stack and loaded the
      correct program, so we can now free args. */
   for (int i = 0; args[i] != NULL; i++) {
+    for (int j = 0; args[i][j] != '\0'; j++) {
+      *--last_arg_end = args[i][j];
+    }
+    *--last_arg_end = '\0';
     free (args[i]);
   }
+
+  if_.esp = last_arg_end;
+
+  /*
+  while (last_arg_end++ != stack_top) {
+    if (*last_arg_end == '\0') {
+      *((char **) --if_.esp) = last_arg_end + 1;
+      printf("Null: %c\n", *last_arg_end);
+    }
+    else {
+      printf("%c\n", *last_arg_end);
+    }
+  }
+  */
 
   /* If load failed, quit. */
   palloc_free_page (args);
