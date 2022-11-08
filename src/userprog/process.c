@@ -20,6 +20,7 @@
 #include "threads/vaddr.h"
 
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
+#define PUSH_STACK(type, pointer, value) pointer = ((type*) pointer) - 1; (*((type*) pointer) = (type) (value))
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -86,38 +87,48 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (args[0], &if_.eip, &if_.esp);
 
-  /* Push passed arguments to the stack. */
-  
-  
+
   char *stack_top = if_.esp;
-  char *last_arg_end = if_.esp;
+  char *last_arg_start = if_.esp;
 
-  /* We have pushed the arguments onto the stack and loaded the
-     correct program, so we can now free args. */
-  for (int i = 0; args[i] != NULL; i++) {
-    for (int j = 0; args[i][j] != '\0'; j++) {
-      *--last_arg_end = args[i][j];
-    }
-    *--last_arg_end = '\0';
-    free (args[i]);
+  /* First, push the arg strings onto the stack and free the memory
+     allocated to them. 
+     
+     We use last_arg_start to mark the address of the first character
+     of the last argument pushed to the stack. */
+  int argc = 0;
+  for (argc = 0; args[argc] != NULL; argc++) {
+    last_arg_start -= (strlen(args[argc]) + 1);
+    strlcpy (last_arg_start, args[argc], strlen(args[argc]) + 1);
+    free (args[argc]);
   }
 
-  if_.esp = last_arg_end;
-
-  /*
-  while (last_arg_end++ != stack_top) {
-    if (*last_arg_end == '\0') {
-      *((char **) --if_.esp) = last_arg_end + 1;
-      printf("Null: %c\n", *last_arg_end);
-    }
-    else {
-      printf("%c\n", *last_arg_end);
-    }
-  }
-  */
-
-  /* If load failed, quit. */
+  /* Free the page allocated for the arguments. */
   palloc_free_page (args);
+
+  /* Word align the stack. */
+  int word_align = (stack_top - last_arg_start) % 4;
+  if_.esp = last_arg_start - word_align;
+  memset (if_.esp, 0, word_align);
+
+  /* Traverse back up the stack from last_arg_start and push the address
+     of the following address each time we encounter a sentinel character.
+     This pushes a pointer to the first character of each argument. */
+  char *word_start = last_arg_start;  
+
+  while (last_arg_start++ != stack_top) {
+    if (*last_arg_start == '\0') {
+      PUSH_STACK (char *, if_.esp, word_start);
+      word_start = last_arg_start + 1;
+    }
+  }
+
+  /* Push argv, argc and return addres to the stack. */
+  PUSH_STACK (char **, if_.esp, ((char **) if_.esp) + 1);
+  PUSH_STACK (int, if_.esp, argc);
+  PUSH_STACK (int, if_.esp, 0);
+  
+  /* If load failed, quit. */
   if (!success) 
     thread_exit ();
 
@@ -507,7 +518,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
