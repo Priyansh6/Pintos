@@ -40,11 +40,12 @@ process_execute (const char *file_name)
   if (args == NULL)
     return TID_ERROR;
 
-  /* Make a copy of FILE_NAME. Otherwise there's a race between the caller and load(). */
+  /* Make a copy of FILE_NAME, because we musn't modify file_name. */
   char *fn_copy = (char *) malloc ((1 + strlen (file_name)) * sizeof (char));
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
+  
   
   char *token, *save_ptr;
   int last = 0;
@@ -87,15 +88,15 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (args[0], &if_.eip, &if_.esp);
 
-
-  char *stack_top = if_.esp;
+  /* We use these variables to keep track of the original stack pointer
+     address (esp_start) and to mark the address of the first character
+     of the last argument pushed to the stack. These are used later in
+     order to push pointers to the start of each argument to the stack. */
+  char *esp_start = if_.esp;
   char *last_arg_start = if_.esp;
 
   /* First, push the arg strings onto the stack and free the memory
-     allocated to them. 
-     
-     We use last_arg_start to mark the address of the first character
-     of the last argument pushed to the stack. */
+     allocated to them. */
   int argc = 0;
   for (argc = 0; args[argc] != NULL; argc++) {
     last_arg_start -= (strlen(args[argc]) + 1);
@@ -107,16 +108,17 @@ start_process (void *file_name_)
   palloc_free_page (args);
 
   /* Word align the stack. */
-  int word_align = (stack_top - last_arg_start) % 4;
+  int word_align = (esp_start - last_arg_start) % 4;
   if_.esp = last_arg_start - word_align;
   memset (if_.esp, 0, word_align);
 
-  /* Traverse back up the stack from last_arg_start and push the address
-     of the following address each time we encounter a sentinel character.
-     This pushes a pointer to the first character of each argument. */
+  /* Traverse back up the stack from last_arg_start until we reach esp_start 
+     and push the address of the following element each time we encounter 
+     a sentinel character. This pushes a pointer to the first character 
+     of each argument. */
   char *word_start = last_arg_start;  
 
-  while (last_arg_start++ != stack_top) {
+  while (last_arg_start++ != esp_start) {
     if (*last_arg_start == '\0') {
       PUSH_STACK (char *, if_.esp, word_start);
       word_start = last_arg_start + 1;
