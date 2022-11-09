@@ -19,6 +19,7 @@ static void get_args (const void *esp, void *args[], int num_args);
 
 static uint32_t exit_handler (void *args[]);
 static uint32_t write_handler (void *args[]);
+static uint32_t wait_handler (void *args[]);
 
 static struct lock fs_lock;
 
@@ -27,7 +28,7 @@ static const struct syscall syscall_ptrs[] = {
   {.handler = &exit_handler, .argc = 1},
   {.handler = &exit_handler, .argc = 1},
   {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
+  {.handler = &wait_handler, .argc = 1},
   {.handler = &exit_handler, .argc = 1},
   {.handler = &exit_handler, .argc = 1},
   {.handler = &exit_handler, .argc = 1},
@@ -84,12 +85,22 @@ is_valid_user_ptr (void *uaddr)
 }
 
 static uint32_t
-exit_handler (void *args[] UNUSED) 
+exit_handler (void *args[]) 
 {
   int *status_code = args[0];
+
+  get_pcb_by_tid (thread_current ()->tid)->status = *status_code;
+
   printf ("%s: exit(%d)\n", thread_current()->name, *status_code);
   thread_exit ();
   return 0;
+}
+
+static uint32_t
+wait_handler (void *args[]) 
+{
+  tid_t *tid = args[0];
+  return process_wait (*tid);
 }
 
 static uint32_t

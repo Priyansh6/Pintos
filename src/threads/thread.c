@@ -1,5 +1,6 @@
 #include "threads/thread.h"
 #include <debug.h>
+#include <hash.h>
 #include <stddef.h>
 #include <random.h>
 #include <stdio.h>
@@ -7,6 +8,7 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
@@ -98,6 +100,7 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -109,6 +112,17 @@ thread_start (void)
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
+
+  hash_init (&blocks, &block_hash, &tid_less, NULL);
+  struct process_control_block *block = malloc (sizeof (struct process_control_block));
+  ASSERT (block != NULL);
+
+  block->tid = 3;
+  block->was_waited_on = false;
+  sema_init (&block->wait_sema, 0);
+  list_init (&block->children); 
+
+  hash_insert (&blocks, &block->blocks_elem);
 
   /* Start preemptive thread scheduling. */
   intr_enable ();
