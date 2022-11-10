@@ -135,7 +135,8 @@ start_process (void *file_name_)
   PUSH_STACK (int, if_.esp, 0);
 
   struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
-  ASSERT (block != NULL);
+  if (block == NULL)
+    success = false;
 
   block->tid = thread_current ()->tid;
   block->status = -1;
