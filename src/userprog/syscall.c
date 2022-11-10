@@ -16,6 +16,8 @@
 static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
 static void get_args (const void *esp, void *args[], int num_args);
+static bool validate_args (void *args[], int argc);
+static void exit_failure ();
 
 static uint32_t exit_handler (void *args[]);
 static uint32_t write_handler (void *args[]);
@@ -54,21 +56,31 @@ syscall_handler (struct intr_frame *f)
   if (is_valid_user_ptr (syscall_n) && *syscall_n >= 0 && *syscall_n < N_SYSCALLS) {
     struct syscall syscall = syscall_ptrs[*syscall_n];
 
-    /* Get all arguments passed to system call from stack */
+    /* Get all arguments passed to system call from stack. */
     void *args[syscall.argc];
     get_args (f->esp, args, syscall.argc);
+
+    /* Make sure that we can dereference all arguments safely. */
+    if (!validate_args (args, syscall.argc))
+      exit_failure ();
     
     /* Make call to corresponding system call handler and put the return value 
        in the eax register. It's okay to do this even when we don't expect a return
        value because nothing else will inspect/require the contents of the eax register. */
     f->eax = syscall.handler (args);
   } else {
-    /* If the user provides an invalid system call number, we handle it gracefully by terminating
-       the user thread. */
-    int status = -1;
-    void *args[1] = {&status};
-    exit_handler (args);
+    exit_failure ();
   }
+}
+
+/* If the user provides an invalid system call number, we handle 
+   it gracefully by terminating the user thread. */
+static void
+exit_failure ()
+{
+  int status = -1;
+  void *args[1] = {&status};
+  exit_handler (args);
 }
 
 static void
@@ -82,6 +94,16 @@ static bool
 is_valid_user_ptr (void *uaddr)
 {
   return uaddr && is_user_vaddr (uaddr) && pagedir_get_page (thread_current ()->pagedir, uaddr);
+}
+
+static bool
+validate_args (void *args[], int argc)
+{
+  for (int i = 0; i < argc; i++) {
+    if (!is_valid_user_ptr (args[i]))
+      return false;
+  }
+  return true;
 }
 
 static uint32_t

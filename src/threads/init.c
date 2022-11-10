@@ -113,6 +113,7 @@ main (void)
 #ifdef USERPROG
   exception_init ();
   syscall_init ();
+  init_process ();
 #endif
 
   /* Start thread scheduler and enable interrupts. */
@@ -134,7 +135,6 @@ main (void)
 
   /* Finish up. */
   shutdown ();
-  get_pcb_by_tid (thread_current ()->tid)->status = 0;
   thread_exit ();
 }
 

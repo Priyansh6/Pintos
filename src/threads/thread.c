@@ -113,17 +113,6 @@ thread_start (void)
   sema_init (&idle_started, 0);
   thread_create ("idle", PRI_MIN, idle, &idle_started);
 
-  hash_init (&blocks, &block_hash, &tid_less, NULL);
-  struct process_control_block *block = malloc (sizeof (struct process_control_block));
-  ASSERT (block != NULL);
-
-  block->tid = 3;
-  block->was_waited_on = false;
-  sema_init (&block->wait_sema, 0);
-  list_init (&block->children); 
-
-  hash_insert (&blocks, &block->blocks_elem);
-
   /* Start preemptive thread scheduling. */
   intr_enable ();
 
