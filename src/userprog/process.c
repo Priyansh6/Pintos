@@ -37,13 +37,12 @@ init_process ()
 }
 
 void
-exit_initial_process (void)
+destroy_initial_process (void)
 {
   struct process_control_block *block = get_pcb_by_tid (INITIAL_USER_PROCESS_TID);
   hash_delete (&blocks, &block->blocks_elem);
   hash_destroy (&blocks, NULL);
   free (block);
-  thread_exit ();
 }
 
 static bool
