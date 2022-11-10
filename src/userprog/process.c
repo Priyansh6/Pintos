@@ -22,8 +22,47 @@
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
 #define PUSH_STACK(type, pointer, value) pointer = ((type*) pointer) - 1; (*((type*) pointer) = (type) (value))
 
+#define INITIAL_USER_PROCESS_TID 3
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool process_control_block_init (tid_t tid, int status);
+
+void
+init_process () 
+{
+  hash_init (&blocks, &block_hash, &tid_less, NULL);
+  process_control_block_init (INITIAL_USER_PROCESS_TID, 0);
+  
+}
+
+void
+exit_initial_process (void)
+{
+  struct process_control_block *block = get_pcb_by_tid (INITIAL_USER_PROCESS_TID);
+  hash_delete (&blocks, &block->blocks_elem);
+  hash_destroy (&blocks, NULL);
+  free (block);
+  thread_exit ();
+}
+
+static bool
+process_control_block_init (tid_t tid, int status)
+{
+  struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
+  if (block == NULL)
+    return false;
+
+  block->tid = tid;
+  block->status = status;
+  block->was_waited_on = false;
+  sema_init (&block->wait_sema, 0);
+  list_init (&block->children); 
+
+  hash_insert (&blocks, &block->blocks_elem);
+
+  return true;
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -68,8 +107,6 @@ process_execute (const char *file_name)
   tid = thread_create (args[0], PRI_DEFAULT, start_process, args);
   if (tid == TID_ERROR)
     palloc_free_page (args);
-
-  
 
   return tid;
 }
@@ -134,17 +171,8 @@ start_process (void *file_name_)
   PUSH_STACK (int, if_.esp, argc);
   PUSH_STACK (int, if_.esp, 0);
 
-  struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
-  if (block == NULL)
-    success = false;
-
-  block->tid = thread_current ()->tid;
-  block->status = -1;
-  block->was_waited_on = false;
-  sema_init (&block->wait_sema, 0);
-  list_init (&block->children); 
-
-  hash_insert (&blocks, &block->blocks_elem);
+  if (thread_current ()->tid != INITIAL_USER_PROCESS_TID)
+    process_control_block_init (thread_current ()->tid, -1);
 
   /* If load failed, quit. */
   if (!success)
@@ -200,6 +228,7 @@ process_exit (void)
   enum intr_level old_level = intr_disable ();
   for (e = list_begin (&pcb->children); e != list_end (&pcb->children); e = list_next (e)) {
     struct process_control_block *child_pcb = list_entry (e, struct process_control_block, child_elem);
+    hash_delete (&blocks, &child_pcb->blocks_elem);
     free (child_pcb);
   }
   intr_set_level (old_level);

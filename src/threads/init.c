@@ -113,7 +113,6 @@ main (void)
 #ifdef USERPROG
   exception_init ();
   syscall_init ();
-  init_process ();
 #endif
 
   /* Start thread scheduler and enable interrupts. */
@@ -121,11 +120,18 @@ main (void)
   serial_init_queue ();
   timer_calibrate ();
 
+
+
+
 #ifdef FILESYS
   /* Initialize file system. */
   ide_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
+#endif
+
+#ifdef USERPROG
+  init_process ();
 #endif
 
   printf ("Boot complete.\n");
@@ -135,7 +141,7 @@ main (void)
 
   /* Finish up. */
   shutdown ();
-  thread_exit ();
+  exit_initial_process ();
 }
 
 /* Clear the "BSS", a segment that should be initialized to
