@@ -197,10 +197,12 @@ process_exit (void)
   struct list_elem *e;
 
   // TODO: THINK ABOUT SYNCHRONIZATION
+  enum intr_level old_level = intr_disable ();
   for (e = list_begin (&pcb->children); e != list_end (&pcb->children); e = list_next (e)) {
     struct process_control_block *child_pcb = list_entry (e, struct process_control_block, child_elem);
     free (child_pcb);
   }
+  intr_set_level (old_level);
   
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
