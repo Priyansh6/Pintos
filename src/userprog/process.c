@@ -631,13 +631,12 @@ install_page (void *upage, void *kpage, bool writable)
 struct process_control_block *
 get_pcb_by_tid (tid_t tid)
 {
-  struct process_control_block *pcb = (struct process_control_block *) malloc (sizeof (struct process_control_block));
-  ASSERT (pcb != NULL);
+  struct process_control_block pcb;
   struct hash_elem *e;
 
-  pcb->tid = tid;
+  pcb.tid = tid;
 
-  e = hash_find (&blocks, &pcb->blocks_elem);
+  e = hash_find (&blocks, &pcb.blocks_elem);
 
   return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
 }
