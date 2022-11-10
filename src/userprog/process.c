@@ -26,16 +26,24 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static bool process_control_block_init (tid_t tid, int status);
+static bool process_control_block_init (tid_t tid);
 
+/* Initialises the hash map used to map processes to their process control blocks
+   and creates a process control block for the first user process (which allows
+   the main thread to wait on it). 
+   
+   Since the main thread has tid 1 and the idle thread has tid 2, the first user process
+   will have tid 3 (INITIAL_USER_PROCESS_TID). */
 void
 init_process () 
 {
   hash_init (&blocks, &block_hash, &tid_less, NULL);
-  process_control_block_init (INITIAL_USER_PROCESS_TID, 0);
-  
+  process_control_block_init (INITIAL_USER_PROCESS_TID);
 }
 
+/* Called when the main thread is about to exit. Frees and deletes the process
+   control block made above from the hash map (as it has no parent to free it) 
+   and also destroys the process control blocks hash map. */
 void
 exit_initial_process (void)
 {
@@ -46,15 +54,18 @@ exit_initial_process (void)
   thread_exit ();
 }
 
+/* Creates and inserts a process control block. We set the return status is -1
+   since we assume that if a process does not call exit, then it has not executed
+   correctly. */
 static bool
-process_control_block_init (tid_t tid, int status)
+process_control_block_init (tid_t tid)
 {
   struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
   if (block == NULL)
     return false;
 
   block->tid = tid;
-  block->status = status;
+  block->status = -1;
   block->was_waited_on = false;
   sema_init (&block->wait_sema, 0);
   list_init (&block->children); 
@@ -171,8 +182,11 @@ start_process (void *file_name_)
   PUSH_STACK (int, if_.esp, argc);
   PUSH_STACK (int, if_.esp, 0);
 
+  /* If the process is not the initial user process, then we create a process
+     control block for it. We have already made a process control block for the
+     initial user process, so we don't want to recreate it here. */
   if (thread_current ()->tid != INITIAL_USER_PROCESS_TID)
-    process_control_block_init (thread_current ()->tid, -1);
+    process_control_block_init (thread_current ()->tid);
 
   /* If load failed, quit. */
   if (!success)
@@ -613,8 +627,7 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-/* Iterates over the process control blocks hash map and returns the entry 
-   corresponding to a particular tid. Returns NULL if entry doens't exist. */
+/* Finds and returns a pointer to the process control block in the blocks hash map. */
 struct process_control_block *
 get_pcb_by_tid (tid_t tid)
 {
