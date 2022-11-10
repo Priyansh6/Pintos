@@ -7,6 +7,7 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "devices/shutdown.h"
 
 /* There are 13 syscalls in task two. */
 #define N_SYSCALLS 13
@@ -19,27 +20,37 @@ static void get_args (const void *esp, void *args[], int num_args);
 static bool validate_args (void *args[], int argc);
 static void exit_failure (void);
 
+static uint32_t halt_handler(void *args[]);
 static uint32_t exit_handler (void *args[]);
-static uint32_t write_handler (void *args[]);
+static uint32_t exec_handler(void *args[]);
 static uint32_t wait_handler (void *args[]);
+static uint32_t create_handler (void *args[]);
+static uint32_t remove_handler (void *args[]);
+static uint32_t open_handler (void *args[]);
+static uint32_t filesize_handler (void *args[]);
+static uint32_t read_handler (void *args[]);
+static uint32_t write_handler (void *args[]);
+static uint32_t seek_handler (void *args[]);
+static uint32_t tell_handler (void *args[]);
+static uint32_t close_handler (void *args[]);
 
 static struct lock fs_lock;
 
 /* Map from system call number to the corresponding handler */
 static const struct syscall syscall_ptrs[] = {
+  {.handler = &halt_handler, .argc = 0},
   {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
+  {.handler = &exec_handler, .argc = 1},
   {.handler = &wait_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
+  {.handler = &create_handler, .argc = 2},
+  {.handler = &remove_handler, .argc = 1},
+  {.handler = &open_handler, .argc = 1},
+  {.handler = &filesize_handler, .argc = 1},
+  {.handler = &read_handler, .argc = 3},
   {.handler = &write_handler, .argc = 3},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
+  {.handler = &seek_handler, .argc = 2},
+  {.handler = &tell_handler, .argc = 1},
+  {.handler = &close_handler, .argc = 1},
 };
 
 void
@@ -107,6 +118,17 @@ validate_args (void *args[], int argc)
 }
 
 static uint32_t
+halt_handler (void *args[] UNUSED)
+{
+  //hash_detroy();
+  shutdown_power_off();
+  destroy_initial_process ();
+  thread_exit ();
+  // //should never get here
+  return 0;
+}
+
+static uint32_t
 exit_handler (void *args[]) 
 {
   int *status_code = args[0];
@@ -119,10 +141,52 @@ exit_handler (void *args[])
 }
 
 static uint32_t
+exec_handler(void *args[]) 
+{
+  const char **cmd = args[0];
+  printf("%s\n", *cmd);
+  int s = process_execute (*cmd);
+  printf("%d\n", s);
+
+  return s;
+}
+
+static uint32_t
 wait_handler (void *args[]) 
 {
   tid_t *tid = args[0];
+  printf("waiting\n");
   return process_wait (*tid);
+}
+
+static uint32_t 
+create_handler (void *args[])
+{
+  return 0;
+}
+
+static uint32_t 
+remove_handler (void *args[])
+{
+  return 0;
+}
+
+static uint32_t 
+open_handler (void *args[])
+{
+  return 0;
+}
+
+static uint32_t 
+filesize_handler (void *args[])
+{
+  return 0;
+}
+
+static uint32_t 
+read_handler (void *args[])
+{
+  return 0;
 }
 
 static uint32_t
@@ -143,4 +207,22 @@ write_handler (void *args[])
       return 0;
   }
 
+}
+
+static uint32_t 
+seek_handler (void *args[])
+{
+  return 0;
+}
+
+static uint32_t 
+tell_handler (void *args[]) 
+{
+  return 0;
+}
+
+static uint32_t 
+close_handler (void *args[]) 
+{
+  return 0;
 }
