@@ -4,8 +4,8 @@
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "threads/malloc.h"
 #include <string.h>
+#include "threads/malloc.h"
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -22,8 +22,47 @@
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
 #define PUSH_STACK(type, pointer, value) pointer = ((type*) pointer) - 1; (*((type*) pointer) = (type) (value))
 
+#define INITIAL_USER_PROCESS_TID 3
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static bool process_control_block_init (tid_t tid, int status);
+
+void
+init_process () 
+{
+  hash_init (&blocks, &block_hash, &tid_less, NULL);
+  process_control_block_init (INITIAL_USER_PROCESS_TID, 0);
+  
+}
+
+void
+exit_initial_process (void)
+{
+  struct process_control_block *block = get_pcb_by_tid (INITIAL_USER_PROCESS_TID);
+  hash_delete (&blocks, &block->blocks_elem);
+  hash_destroy (&blocks, NULL);
+  free (block);
+  thread_exit ();
+}
+
+static bool
+process_control_block_init (tid_t tid, int status)
+{
+  struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
+  if (block == NULL)
+    return false;
+
+  block->tid = tid;
+  block->status = status;
+  block->was_waited_on = false;
+  sema_init (&block->wait_sema, 0);
+  list_init (&block->children); 
+
+  hash_insert (&blocks, &block->blocks_elem);
+
+  return true;
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -67,7 +106,8 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (args[0], PRI_DEFAULT, start_process, args);
   if (tid == TID_ERROR)
-    palloc_free_page (args); 
+    palloc_free_page (args);
+
   return tid;
 }
 
@@ -97,6 +137,7 @@ start_process (void *file_name_)
 
   /* First, push the arg strings onto the stack and free the memory
      allocated to them. */
+     // TODO: what if we reach end of page
   int argc = 0;
   for (argc = 0; args[argc] != NULL; argc++) {
     last_arg_start -= (strlen(args[argc]) + 1);
@@ -129,9 +170,12 @@ start_process (void *file_name_)
   PUSH_STACK (char **, if_.esp, ((char **) if_.esp) + 1);
   PUSH_STACK (int, if_.esp, argc);
   PUSH_STACK (int, if_.esp, 0);
-  
+
+  if (thread_current ()->tid != INITIAL_USER_PROCESS_TID)
+    process_control_block_init (thread_current ()->tid, -1);
+
   /* If load failed, quit. */
-  if (!success) 
+  if (!success)
     thread_exit ();
 
   /* Start the user process by simulating a return from an
@@ -154,10 +198,17 @@ start_process (void *file_name_)
  * This function will be implemented in task 2.
  * For now, it does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  while (true) {}
-  return -1;
+  struct process_control_block *child_pcb = get_pcb_by_tid (child_tid);
+
+  if (child_pcb == NULL || child_pcb->was_waited_on)
+    return -1;
+
+  sema_down (&child_pcb->wait_sema);
+  child_pcb->was_waited_on = true;
+
+  return child_pcb->status;
 }
 
 /* Free the current process's resources. */
@@ -167,6 +218,21 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  struct process_control_block *pcb = get_pcb_by_tid (cur->tid);
+
+  sema_up (&pcb->wait_sema);
+
+  struct list_elem *e;
+
+  // TODO: THINK ABOUT SYNCHRONIZATION
+  enum intr_level old_level = intr_disable ();
+  for (e = list_begin (&pcb->children); e != list_end (&pcb->children); e = list_next (e)) {
+    struct process_control_block *child_pcb = list_entry (e, struct process_control_block, child_elem);
+    hash_delete (&blocks, &child_pcb->blocks_elem);
+    free (child_pcb);
+  }
+  intr_set_level (old_level);
+  
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -545,4 +611,35 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* Iterates over the process control blocks hash map and returns the entry 
+   corresponding to a particular tid. Returns NULL if entry doens't exist. */
+struct process_control_block *
+get_pcb_by_tid (tid_t tid)
+{
+  struct process_control_block *pcb = (struct process_control_block *) malloc (sizeof (struct process_control_block));
+  ASSERT (pcb != NULL);
+  struct hash_elem *e;
+
+  pcb->tid = tid;
+
+  e = hash_find (&blocks, &pcb->blocks_elem);
+
+  return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
+}
+
+/* Compares process_control_blocks on the basis of their associated tid. */
+bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
+  const struct process_control_block *pcb_a = hash_entry (a, struct process_control_block, blocks_elem);
+  const struct process_control_block *pcb_b = hash_entry (b, struct process_control_block, blocks_elem);
+
+  return pcb_a->tid < pcb_b->tid;
+}
+
+/* Hashes the tid field of a process control block*/
+unsigned int block_hash (const struct hash_elem *elem, void *aux UNUSED) {
+  const struct process_control_block *pcb = hash_entry (elem, struct process_control_block, blocks_elem);
+
+  return hash_int (pcb->tid);
 }
