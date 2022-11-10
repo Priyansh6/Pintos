@@ -153,6 +153,8 @@ start_process (void *file_name_)
   if_.esp = last_arg_start - word_align;
   memset (if_.esp, 0, word_align);
 
+  PUSH_STACK (char, if_.esp, '\0');
+
   /* Traverse back up the stack from last_arg_start until we reach esp_start 
      and push the address of the following element each time we encounter 
      a sentinel character. This pushes a pointer to the first character 
