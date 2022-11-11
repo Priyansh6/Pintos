@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "filesys/filesys.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
@@ -174,7 +175,14 @@ remove_handler (void *args[])
 static uint32_t 
 open_handler (void *args[])
 {
-  return 0;
+  char **file = args[0];
+  struct file *opened_file = filesys_open(*file);
+  // TODO: CHECK IF FILE IS NULL
+  
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  int fd = pcb_add_file (pcb, opened_file);
+
+  return fd;
 }
 
 static uint32_t 

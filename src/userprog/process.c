@@ -10,7 +10,6 @@
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
-#include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "threads/flags.h"
 #include "threads/init.h"
@@ -55,8 +54,9 @@ process_control_block_init (tid_t tid, int status)
   block->tid = tid;
   block->status = status;
   block->was_waited_on = false;
+  block->next_fd = 2;
   sema_init (&block->wait_sema, 0);
-  list_init (&block->children); 
+  list_init (&block->children);
 
   hash_insert (&blocks, &block->blocks_elem);
 
@@ -628,6 +628,21 @@ get_pcb_by_tid (tid_t tid)
   e = hash_find (&blocks, &pcb->blocks_elem);
 
   return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
+}
+
+/* Adds a file to a process's pcb as well as assigning it a file descriptor, which it returns. */
+/* TODO: Memory management */
+int
+pcb_add_file (struct process_control_block *pcb, struct file* file) {
+  struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
+  // TODO: Check pfile if null
+
+  int assigned_fd = pcb->next_fd++;
+  pfile->fd = assigned_fd;
+  pfile->file = file;
+  list_push_back (&pcb->files, &pfile->file_elem);
+  
+  return assigned_fd;
 }
 
 /* Compares process_control_blocks on the basis of their associated tid. */

@@ -1,6 +1,7 @@
 #ifndef USERPROG_PROCESS_H
 #define USERPROG_PROCESS_H
 
+#include "filesys/file.h"
 #include <hash.h>
 #include <list.h>
 #include "threads/synch.h"
@@ -19,6 +20,16 @@ struct process_control_block {
 
   struct list children;           /* Each process_control_block contains a list of all its children. */
   struct list_elem child_elem;    /* Required to embed process_control_blocks in a struct list. */
+
+  int next_fd;                    /* Contains the next possible file descriptor for this process */
+  struct list files;              /* Map from file descriptors to struct process_file */
+};
+
+struct process_file {
+  int fd;                         /* Stores the file descriptor for this file in a process. */
+  struct file *file;              /* Stores pointer to associated file */
+
+  struct list_elem file_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
 
 /* Map from pid_t to struct process_control_block */
@@ -32,6 +43,7 @@ void process_exit (void);
 void process_activate (void);
 
 struct process_control_block *get_pcb_by_tid (tid_t tid);
+int pcb_add_file (struct process_control_block *pcb, struct file* file);
 bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 unsigned int block_hash (const struct hash_elem *elem, void *aux UNUSED);
 
