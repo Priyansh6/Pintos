@@ -57,6 +57,7 @@ process_control_block_init (tid_t tid, int status)
   block->next_fd = 2;
   sema_init (&block->wait_sema, 0);
   list_init (&block->children);
+  list_init (&block->files);
 
   hash_insert (&blocks, &block->blocks_elem);
 

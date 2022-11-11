@@ -176,9 +176,13 @@ static uint32_t
 open_handler (void *args[])
 {
   char **file = args[0];
-  struct file *opened_file = filesys_open(*file);
-  // TODO: CHECK IF FILE IS NULL
+  if (*file == NULL)
+    return -1;
   
+  struct file *opened_file = filesys_open(*file);
+  if (opened_file == NULL)
+    return -1;
+
   struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   int fd = pcb_add_file (pcb, opened_file);
 
