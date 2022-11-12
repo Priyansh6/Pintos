@@ -9,6 +9,7 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "devices/input.h"
 #include "devices/shutdown.h"
 
 /* There are 13 syscalls in task two. */
@@ -21,6 +22,11 @@ static bool is_valid_user_ptr (void *uaddr);
 static void get_args (const void *esp, void *args[], int num_args);
 static bool validate_args (void *args[], int argc);
 static void exit_failure (void);
+
+static struct file *get_file (int fd);
+static bool remove_file (int fd);
+static void assert_fd_greater_than (int fd, int highest_invalid_fd);
+static void assert_valid_fd (int fd);
 
 static uint32_t halt_handler(void *args[]);
 static uint32_t exit_handler (void *args[]);
@@ -173,6 +179,39 @@ remove_handler (void *args[])
   return 0;
 }
 
+/* Gets file with file decriptor fd from the current running process's process
+   control block. Calls exit_failure if a file was not found. */
+static struct file *
+get_file (int fd) {
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  struct file *file = pcb_get_file (pcb, fd);
+  if (file == NULL)
+    exit_failure ();
+  return file;
+}
+
+/* Removes file with file descriptor fd from the current running process's process
+   control block and frees it from memory. Returns whether a file was removed. */
+static bool
+remove_file (int fd) {
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  return pcb_remove_file (pcb, fd);
+}
+
+/* Calls exit failure if fd is greater than highest_invalid_fd. */
+static void
+assert_fd_greater_than (int fd, int highest_invalid_fd) {
+  if (fd <= highest_invalid_fd)
+    exit_failure ();
+}
+
+/* Checks if provided file descriptor is valid (greater than 0) and calls exit_failure
+   if it isn't. */
+static void
+assert_valid_fd (int fd) {
+  assert_fd_greater_than (fd, -1);
+}
+
 static uint32_t 
 open_handler (void *args[])
 {
@@ -187,7 +226,7 @@ open_handler (void *args[])
   struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   int fd = pcb_add_file (pcb, opened_file);
 
-  if (fd == -1)
+  if (fd < 0)
     file_close (opened_file);
 
   return fd;
@@ -197,41 +236,57 @@ static uint32_t
 filesize_handler (void *args[])
 {
   int *fd = args[0];
-  if (*fd <= 1)
-    exit_failure ();
+  assert_fd_greater_than (*fd, 1);
 
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  struct file *file = pcb_get_file (pcb, *fd);
-  if (file == NULL)
-    exit_failure ();
-   
+  struct file *file = get_file (*fd);
   return file_length (file);
 }
 
 static uint32_t 
 read_handler (void *args[])
 {
-  return 0;
+  int *fd = args[0];
+  void **buffer = args[1];
+  uint32_t *size = args[2];
+  assert_valid_fd (*fd);
+
+  switch (*fd) {
+    case 0:
+      char *input_buffer = *buffer;
+      for (uint32_t i = 0; i < *size; i++) {
+        input_buffer[i] = input_getc ();
+      }
+      return *size;
+    case 1:
+      exit_failure ();
+      return 0;
+    default:
+      struct file *file = get_file (*fd);
+      return file_read (file, *buffer, *size);
+  }
 }
 
 static uint32_t
 write_handler (void *args[])
 {
-
   int *fd = args[0];
   char **buffer = args[1];
-  int *size = args[2];
+  uint32_t *size = args[2];
+  assert_valid_fd (*fd);
 
   switch (*fd) {
+    case 0:
+      exit_failure ();
+      return 0;
     case 1:
-      for (int i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT) {
+      for (uint32_t i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT) {
         putbuf (*(buffer) + i, MIN(MAX_CONSOLE_BUFFER_OUTPUT, *size - i));
       }
       return *size;
     default:
-      return 0;
+      struct file *file = get_file (*fd);
+      return file_write (file, *buffer, *size);
   }
-
 }
 
 static uint32_t 
@@ -247,7 +302,12 @@ tell_handler (void *args[])
 }
 
 static uint32_t 
-close_handler (void *args[]) 
+close_handler (void *args[])
+// TODO: CLOSE ALL FILES ASSOCIATED WITH PROCESS WHEN IT EXITS
 {
+  int *fd = args[0];
+  assert_fd_greater_than (*fd, 1);
+
+  remove_file (*fd);
   return 0;
 }

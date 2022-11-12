@@ -9,7 +9,8 @@
 
 /* Each process has its own process control block responsible
    for keeping track of any children it could wait on and storing
-   the return status of these children. */
+   the return status of these children. It also keeps track of the file
+   descriptors associated with the process. */
 struct process_control_block {
   tid_t tid;                      /* tid of process. */
   int status;                     /* Stores the exit status of this process. */
@@ -25,6 +26,8 @@ struct process_control_block {
   struct list files;              /* Map from file descriptors to struct process_file */
 };
 
+/* This struct is used to store pointers to files associated with processes
+   as well as the corresponding file descriptors. */
 struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
@@ -45,6 +48,7 @@ void process_activate (void);
 struct process_control_block *get_pcb_by_tid (tid_t tid);
 int pcb_add_file (struct process_control_block *pcb, struct file* file);
 struct file *pcb_get_file (struct process_control_block *pcb, int fb);
+bool pcb_remove_file (struct process_control_block *pcb, int fd);
 bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 unsigned int block_hash (const struct hash_elem *elem, void *aux UNUSED);
 
