@@ -631,19 +631,39 @@ get_pcb_by_tid (tid_t tid)
   return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
 }
 
-/* Adds a file to a process's pcb as well as assigning it a file descriptor, which it returns. */
+/* Adds a file to a process's pcb as well as assigning it a file descriptor, which it returns. Returns -1 if fails */
 /* TODO: Memory management */
 int
 pcb_add_file (struct process_control_block *pcb, struct file* file) {
   struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
-  // TODO: Check pfile if null
+  if (pfile == NULL)
+    return -1;
 
   int assigned_fd = pcb->next_fd++;
   pfile->fd = assigned_fd;
   pfile->file = file;
-  list_push_back (&pcb->files, &pfile->file_elem);
+  list_push_back (&pcb->files, &pfile->list_elem);
   
   return assigned_fd;
+}
+
+/* Returns file_struct associated with file descriptor fd in the provided pcb */
+struct file *
+pcb_get_file (struct process_control_block *pcb, int fd)
+{
+  if (!list_empty (&pcb->files)) {
+    struct list_elem *e;
+    for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
+      struct process_file *pfile = list_entry (e, struct process_file, list_elem);
+      if (pfile->fd == fd) {
+        return pfile->file;
+      }
+      if (pfile->fd > fd) {
+        return NULL;
+      }
+    }
+  }
+  return NULL;
 }
 
 /* Compares process_control_blocks on the basis of their associated tid. */

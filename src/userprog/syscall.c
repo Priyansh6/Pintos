@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "filesys/file.h"
 #include "filesys/filesys.h"
 #include <stdio.h>
 #include <syscall-nr.h>
@@ -186,13 +187,25 @@ open_handler (void *args[])
   struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   int fd = pcb_add_file (pcb, opened_file);
 
+  if (fd == -1)
+    file_close (opened_file);
+
   return fd;
 }
 
 static uint32_t 
 filesize_handler (void *args[])
 {
-  return 0;
+  int *fd = args[0];
+  if (*fd <= 1)
+    exit_failure ();
+
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  struct file *file = pcb_get_file (pcb, *fd);
+  if (file == NULL)
+    exit_failure ();
+   
+  return file_length (file);
 }
 
 static uint32_t 

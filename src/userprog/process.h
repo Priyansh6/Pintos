@@ -29,7 +29,7 @@ struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
 
-  struct list_elem file_elem;     /* Enables process_file to be in files list of process_control_block. */
+  struct list_elem list_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
 
 /* Map from pid_t to struct process_control_block */
@@ -44,6 +44,7 @@ void process_activate (void);
 
 struct process_control_block *get_pcb_by_tid (tid_t tid);
 int pcb_add_file (struct process_control_block *pcb, struct file* file);
+struct file *pcb_get_file (struct process_control_block *pcb, int fb);
 bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 unsigned int block_hash (const struct hash_elem *elem, void *aux UNUSED);
 
