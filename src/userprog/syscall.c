@@ -225,7 +225,6 @@ open_handler (void *args[])
 
   struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   int fd = pcb_add_file (pcb, opened_file);
-
   if (fd < 0)
     file_close (opened_file);
 
@@ -292,13 +291,21 @@ write_handler (void *args[])
 static uint32_t 
 seek_handler (void *args[])
 {
+  int *fd = args[0];
+  uint32_t *position = args[1];
+
+  struct file *file = get_file (*fd);
+  file_seek (file, *position);
   return 0;
 }
 
 static uint32_t 
 tell_handler (void *args[]) 
 {
-  return 0;
+  int *fd = args[0];
+
+  struct file *file = get_file (*fd);
+  return file_tell (file);
 }
 
 static uint32_t 

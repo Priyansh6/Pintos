@@ -26,6 +26,7 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static bool process_control_block_init (tid_t tid, int status);
+static void process_file_close (struct process_file *pfile);
 
 void
 init_process () 
@@ -62,6 +63,13 @@ process_control_block_init (tid_t tid, int status)
   hash_insert (&blocks, &block->blocks_elem);
 
   return true;
+}
+
+static void
+process_file_close (struct process_file *pfile) {
+  list_remove (&pfile->list_elem);
+  file_close (pfile->file);
+  free (pfile);
 }
 
 /* Starts a new thread running a user program loaded from
@@ -674,18 +682,28 @@ pcb_get_file (struct process_control_block *pcb, int fd)
   return pfile == NULL ? NULL : pfile->file;
 }
 
-/* Removes file with file descriptor fd from process control block pcb */
+/* Removes file with file descriptor fd from process control block pcb.
+   Returns true if a file is removed. */
 bool
 pcb_remove_file (struct process_control_block *pcb, int fd) {
   struct process_file *pfile = pcb_get_process_file (pcb, fd);
   if (pfile == NULL) {
     return false;
   }
-
-  list_remove (&pfile->list_elem);
-  file_close (pfile->file);
-  free (pfile);
+  process_file_close (pfile);
   return true;
+}
+
+/* Removes all files associated with process control block pcb. */
+void
+pcb_remove_all_files (struct process_control_block *pcb) {
+  if (!list_empty (&pcb->files)) {
+    struct list_elem *e;
+    for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
+      struct process_file *pfile = list_entry (e, struct process_file, list_elem);
+      process_file_close (pfile);
+    }
+  }
 }
 
 /* Compares process_control_blocks on the basis of their associated tid. */
