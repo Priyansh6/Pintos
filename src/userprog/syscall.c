@@ -8,8 +8,9 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
-#include "lib/kernel/hash.h"
+#include "hash.h"
 #include "filesys/filesys.h"
+#include "threads/malloc.h"
 
 /* There are 13 syscalls in task two. */
 #define N_SYSCALLS 13
@@ -18,7 +19,7 @@
 
 static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
-static void get_args (const void *esp, void *args[], int num_args);
+static void get_args (void *esp, void *args[], int num_args);
 static bool validate_args (void *args[], int argc);
 static void exit_failure (void);
 
@@ -97,7 +98,7 @@ exit_failure (void)
 }
 
 static void
-get_args (const void *esp, void *args[], int num_args)
+get_args (void *esp, void *args[], int num_args)
 {
   for (int i = 0; i < num_args; i++)
     args[i] = esp + (sizeof(void *) * (i + 1));
@@ -120,7 +121,7 @@ validate_args (void *args[], int argc)
 }
 
 static void
-free_hash_elem(struct hash_elem *e, void *aux)
+free_hash_elem(struct hash_elem *e, void *aux UNUSED)
 {
   struct process_control_block *pcb = hash_entry (e, struct process_control_block, blocks_elem);
   free(pcb);
@@ -176,13 +177,19 @@ wait_handler (void *args[])
 static uint32_t 
 create_handler (void *args[])
 {
-  const char *file = args[0];
-  off_t initial_size = (off_t) args[1];
+  char **file = args[0];
+  off_t *initial_size = args[1];
+
   //locking across file system
-  lock_acquire(&fs_lock);
-  bool success = filesys_create(file, initial_size);
-  lock_release(&fs_lock);
-  return success;
+  if (is_valid_user_ptr(*file)) {
+    lock_acquire(&fs_lock);
+    bool success = filesys_create(*file, *initial_size);
+    lock_release(&fs_lock);
+    return success;
+  } else {
+    exit_failure();
+    return 0;
+  }
 }
 
 static uint32_t 
