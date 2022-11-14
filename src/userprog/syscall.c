@@ -8,6 +8,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "devices/shutdown.h"
+#include "lib/kernel/hash.h"
+#include "filesys/filesys.h"
 
 /* There are 13 syscalls in task two. */
 #define N_SYSCALLS 13
@@ -117,14 +119,24 @@ validate_args (void *args[], int argc)
   return true;
 }
 
+static void
+free_hash_elem(struct hash_elem *e, void *aux)
+{
+  struct process_control_block *pcb = hash_entry (e, struct process_control_block, blocks_elem);
+  free(pcb);
+}
+
 static uint32_t
 halt_handler (void *args[] UNUSED)
 {
-  //hash_detroy();
+  //free all entries in blocks hash table and the table itself
+  hash_destroy(&blocks, free_hash_elem);
+
+  //shutdown pintos
   shutdown_power_off();
   destroy_initial_process ();
   thread_exit ();
-  // //should never get here
+  //should never get here
   return 0;
 }
 
@@ -143,26 +155,34 @@ exit_handler (void *args[])
 static uint32_t
 exec_handler(void *args[]) 
 {
-  const char **cmd = args[0];
-  printf("%s\n", *cmd);
-  int s = process_execute (*cmd);
-  printf("%d\n", s);
-
-  return s;
+ // if (!is_valid_user_ptr ((const char **) args[0]))
+ //   return -1;
+  
+  tid_t tid = process_execute (*((const char **) args[0]));
+  struct process_control_block *pcb = get_pcb_by_tid (tid);
+  sema_down (&pcb->load_sema);
+  return pcb->has_loaded ? tid : -1;
 }
 
 static uint32_t
 wait_handler (void *args[]) 
 {
   tid_t *tid = args[0];
-  printf("waiting\n");
   return process_wait (*tid);
 }
 
+//creates a new file on the filesys
+//NOT TESTED
 static uint32_t 
 create_handler (void *args[])
 {
-  return 0;
+  const char *file = args[0];
+  off_t initial_size = (off_t) args[1];
+  //locking across file system
+  lock_acquire(&fs_lock);
+  bool success = filesys_create(file, initial_size);
+  lock_release(&fs_lock);
+  return success;
 }
 
 static uint32_t 
@@ -192,6 +212,8 @@ read_handler (void *args[])
 static uint32_t
 write_handler (void *args[])
 {
+
+
 
   int *fd = args[0];
   char **buffer = args[1];

@@ -67,6 +67,7 @@ process_control_block_init (tid_t tid)
   block->status = -1;
   block->was_waited_on = false;
   sema_init (&block->wait_sema, 0);
+  sema_init (&block->load_sema, 0);
   list_init (&block->children); 
 
   hash_insert (&blocks, &block->blocks_elem);
@@ -106,6 +107,8 @@ process_execute (const char *file_name)
       return TID_ERROR;
     memcpy (args[last], token, strlen(token) + 1);
   }
+
+  args[last] = NULL;
   
   free (fn_copy);
 
@@ -115,6 +118,13 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (args[0], PRI_DEFAULT, start_process, args);
+
+  /* If the process is not the initial user process, then we create a process
+     control block for it. We have already made a process control block for the
+     initial user process, so we don't want to recreate it here. */
+  if (tid != INITIAL_USER_PROCESS_TID)
+    process_control_block_init (tid);
+
   if (tid == TID_ERROR)
     palloc_free_page (args);
 
@@ -137,6 +147,19 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (args[0], &if_.eip, &if_.esp);
+
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  pcb->has_loaded = success;
+  sema_up (&pcb->load_sema);
+
+  /* If load failed, quit. */
+  if (!success) {
+    for (int argc = 0; args[argc] != NULL; argc++) {
+      free (args[argc]);
+    }
+    palloc_free_page (args);
+    thread_exit ();
+  }
 
   /* We use these variables to keep track of the original stack pointer
      address (esp_start) and to mark the address of the first character
@@ -183,16 +206,6 @@ start_process (void *file_name_)
   PUSH_STACK (char **, if_.esp, ((char **) if_.esp) + 1);
   PUSH_STACK (int, if_.esp, argc);
   PUSH_STACK (int, if_.esp, 0);
-
-  /* If the process is not the initial user process, then we create a process
-     control block for it. We have already made a process control block for the
-     initial user process, so we don't want to recreate it here. */
-  if (thread_current ()->tid != INITIAL_USER_PROCESS_TID)
-    process_control_block_init (thread_current ()->tid);
-
-  /* If load failed, quit. */
-  if (!success)
-    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in

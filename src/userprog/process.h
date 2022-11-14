@@ -10,10 +10,13 @@
    for keeping track of any children it could wait on and storing
    the return status of these children. */
 struct process_control_block {
-  tid_t tid;                      /* tid of process. */
+  tid_t tid;        
+                /* tid of process. */
   int status;                     /* Stores the exit status of this process. */
   bool was_waited_on;             /* Processes can't be waited on more than once. */
+  bool has_loaded;
   struct semaphore wait_sema;     /* Semaphore to synchronise parent and child process. */
+  struct semaphore load_sema;
 
   struct hash_elem blocks_elem;   /* Enables process_control_block to be in struct hash. */
 
@@ -22,7 +25,7 @@ struct process_control_block {
 };
 
 /* Map from pid_t to struct process_control_block */
-struct hash blocks;
+static struct hash blocks;
 
 void init_process (void);
 void destroy_initial_process (void);
