@@ -10,7 +10,6 @@
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
-#include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "threads/flags.h"
 #include "threads/init.h"
@@ -26,7 +25,6 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static bool process_control_block_init (tid_t tid);
 
 /* Initialises the hash map used to map processes to their process control blocks
    and creates a process control block for the first user process (which allows
@@ -34,6 +32,9 @@ static bool process_control_block_init (tid_t tid);
    
    Since the main thread has tid 1 and the idle thread has tid 2, the first user process
    will have tid 3 (INITIAL_USER_PROCESS_TID). */
+static bool process_control_block_init (tid_t tid);
+static void process_file_close (struct process_file *pfile);
+
 void
 init_process () 
 {
@@ -66,13 +67,22 @@ process_control_block_init (tid_t tid)
   block->tid = tid;
   block->status = -1;
   block->was_waited_on = false;
+  block->next_fd = 2;
   sema_init (&block->wait_sema, 0);
   sema_init (&block->load_sema, 0);
-  list_init (&block->children); 
+  list_init (&block->children);
+  list_init (&block->files);
 
   hash_insert (&blocks, &block->blocks_elem);
 
   return true;
+}
+
+static void
+process_file_close (struct process_file *pfile) {
+  list_remove (&pfile->list_elem);
+  file_close (pfile->file);
+  free (pfile);
 }
 
 /* Starts a new thread running a user program loaded from
@@ -654,6 +664,73 @@ get_pcb_by_tid (tid_t tid)
   e = hash_find (&blocks, &pcb.blocks_elem);
 
   return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
+}
+
+/* Adds a file to a process's pcb as well as assigning it a file descriptor, which it returns. Returns -1 if fails */
+int
+pcb_add_file (struct process_control_block *pcb, struct file* file) {
+  struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
+  if (pfile == NULL)
+    return -1;
+
+  int assigned_fd = pcb->next_fd++;
+  pfile->fd = assigned_fd;
+  pfile->file = file;
+  list_push_back (&pcb->files, &pfile->list_elem);
+  
+  return assigned_fd;
+}
+
+/* Returns process_file struct associated with file descriptor fd in the provided pcb or
+   NULL if no file could be found. */
+static struct process_file *
+pcb_get_process_file (struct process_control_block *pcb, int fd) {
+  if (!list_empty (&pcb->files)) {
+    struct list_elem *e;
+    for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
+      struct process_file *pfile = list_entry (e, struct process_file, list_elem);
+      if (pfile->fd == fd) {
+        return pfile;
+      }
+      if (pfile->fd > fd) {
+        return NULL;
+      }
+    }
+  }
+  return NULL;
+}
+
+/* Returns file struct associated with file descriptor fd in the provided pcb or
+   NULL if no file could be found. */
+struct file *
+pcb_get_file (struct process_control_block *pcb, int fd)
+{
+  struct process_file *pfile = pcb_get_process_file (pcb, fd);
+  return pfile == NULL ? NULL : pfile->file;
+}
+
+/* Removes file with file descriptor fd from process control block pcb.
+   Returns true if a file is removed. */
+bool
+pcb_remove_file (struct process_control_block *pcb, int fd) {
+  struct process_file *pfile = pcb_get_process_file (pcb, fd);
+  if (pfile == NULL) {
+    return false;
+  }
+  process_file_close (pfile);
+  return true;
+}
+
+/* Removes all files associated with process control block pcb. */
+void
+pcb_remove_all_files (struct process_control_block *pcb) {
+  if (!list_empty (&pcb->files)) {
+    struct list_elem *e;
+    for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
+      struct process_file *pfile = list_entry (e, struct process_file, list_elem);
+      process_file_close (pfile);
+    }
+  }
 }
 
 /* Compares process_control_blocks on the basis of their associated tid. */
