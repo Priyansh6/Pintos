@@ -203,16 +203,11 @@ create_handler (void *args[])
 
   off_t *initial_size = args[1];
 
-  //locking across file system
-  if (is_valid_user_ptr(*file)) {
-    lock_acquire(&fs_lock);
-    bool success = filesys_create(*file, *initial_size);
-    lock_release(&fs_lock);
-    return success;
-  } else {
-    exit_failure();
-    return 0;
-  }
+  lock_acquire(&fs_lock);
+  bool success = filesys_create(*file, *initial_size);
+  lock_release(&fs_lock);
+  return success;
+
 }
 
 static uint32_t 
@@ -222,7 +217,10 @@ remove_handler (void *args[])
   if (!VALIDATE_USER_POINTER (char *, *file))
     exit_failure ();
 
-  return 0;
+  lock_acquire (&fs_lock);
+  bool result = filesys_remove (*file);
+  lock_release (&fs_lock);
+  return result;
 }
 
 /* Gets file with file decriptor fd from the current running process's process
@@ -264,20 +262,20 @@ open_handler (void *args[])
   const char **file = args[0];
   if (!VALIDATE_USER_POINTER (char *, *file))
     exit_failure ();
-
-  // Think this is no longer necessary but don't want to remove without confirming
-  if (*file == NULL)
-    return -1;
   
+  lock_acquire (&fs_lock);
   struct file *opened_file = filesys_open(*file);
-  if (opened_file == NULL)
+  if (opened_file == NULL) {
+    lock_release (&fs_lock);
     return -1;
+  }
 
   struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   int fd = pcb_add_file (pcb, opened_file);
   if (fd < 0)
     file_close (opened_file);
 
+  lock_release (&fs_lock);
   return fd;
 }
 
@@ -287,8 +285,11 @@ filesize_handler (void *args[])
   int *fd = args[0];
   assert_fd_greater_than (*fd, 1);
 
+  lock_acquire (&fs_lock);
   struct file *file = get_file (*fd);
-  return file_length (file);
+  uint32_t length = file_length (file);
+  lock_release (&fs_lock);
+  return length;
 }
 
 static uint32_t 
@@ -298,6 +299,9 @@ read_handler (void *args[])
   char **buffer = args[1];
   uint32_t *size = args[2];
   assert_valid_fd (*fd);
+
+  if (!VALIDATE_USER_POINTER (char *, *buffer))
+    exit_failure ();
 
   switch (*fd) {
     case 0:
@@ -309,7 +313,10 @@ read_handler (void *args[])
       exit_failure ();
       return 0;
     default:
-      return file_read (get_file(*fd), *buffer, *size);
+      lock_acquire (&fs_lock);
+      uint32_t bytes_read = file_read (get_file(*fd), *buffer, *size);
+      lock_release (&fs_lock);
+      return bytes_read;
   }
 }
 
@@ -334,7 +341,10 @@ write_handler (void *args[])
       }
       return *size;
     default:
-      return file_write (get_file(*fd), *buffer, *size);
+      lock_acquire (&fs_lock);
+      uint32_t bytes_written = file_write (get_file(*fd), *buffer, *size);
+      lock_release (&fs_lock);
+      return bytes_written;
   }
 }
 
@@ -345,7 +355,9 @@ seek_handler (void *args[])
   uint32_t *position = args[1];
 
   struct file *file = get_file (*fd);
+  lock_acquire (&fs_lock);
   file_seek (file, *position);
+  lock_release (&fs_lock);
   return 0;
 }
 
@@ -353,9 +365,11 @@ static uint32_t
 tell_handler (void *args[]) 
 {
   int *fd = args[0];
-
+  lock_acquire (&fs_lock);
   struct file *file = get_file (*fd);
-  return file_tell (file);
+  uint32_t position = file_tell (file);
+  lock_release (&fs_lock);
+  return position;
 }
 
 static uint32_t 
@@ -365,6 +379,8 @@ close_handler (void *args[])
   int *fd = args[0];
   assert_fd_greater_than (*fd, 1);
 
+  lock_acquire (&fs_lock);
   remove_file (*fd);
+  lock_release (&fs_lock);
   return 0;
 }

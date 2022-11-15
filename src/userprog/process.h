@@ -12,11 +12,15 @@
    the return status of these children. It also keeps track of the file
    descriptors associated with the process. */
 struct process_control_block {
-  tid_t tid;        
-                /* tid of process. */
+  tid_t tid;                      /* tid of process. */
+  tid_t parent_tid;               /* tid of parent process */
+
   int status;                     /* Stores the exit status of this process. */
   bool was_waited_on;             /* Processes can't be waited on more than once. */
-  bool has_loaded;
+
+  bool has_loaded;                // TODO: think about how we can get rid of this
+  bool has_exited;                // TODO: COMBINE WITH was_waited_on
+  
   struct semaphore wait_sema;     /* Semaphore to synchronise parent and child process. */
   struct semaphore load_sema;
 

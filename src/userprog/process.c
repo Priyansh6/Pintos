@@ -42,6 +42,14 @@ init_process ()
   process_control_block_init (INITIAL_USER_PROCESS_TID);
 }
 
+void
+free_pcb (struct process_control_block *pcb)
+{
+  hash_delete (&blocks, &pcb->blocks_elem);
+
+  free (pcb);
+}
+
 /* Called when the main thread is about to exit. Frees and deletes the process
    control block made above from the hash map (as it has no parent to free it) 
    and also destroys the process control blocks hash map. */
@@ -65,7 +73,9 @@ process_control_block_init (tid_t tid)
     return false;
 
   block->tid = tid;
+  block->parent_tid = thread_current ()->tid;
   block->status = -1;
+  block->has_exited = false;
   block->was_waited_on = false;
   block->next_fd = 2;
   sema_init (&block->wait_sema, 0);
@@ -74,6 +84,11 @@ process_control_block_init (tid_t tid)
   list_init (&block->files);
 
   hash_insert (&blocks, &block->blocks_elem);
+
+  struct process_control_block *parent_block = get_pcb_by_tid (thread_current ()->tid);
+
+  if (parent_block != NULL)
+    list_push_back (&parent_block->children, &block->child_elem);
 
   return true;
 }
@@ -264,12 +279,51 @@ process_exit (void)
   struct list_elem *e;
 
   // TODO: THINK ABOUT SYNCHRONIZATION
+  
   enum intr_level old_level = intr_disable ();
-  for (e = list_begin (&pcb->children); e != list_end (&pcb->children); e = list_next (e)) {
+  
+  // I want to die and for all my children (my child has died, then it is my responsiblity to free my dead child)
+
+  pcb_remove_all_files (pcb);
+
+  for (e = list_begin (&pcb->children); e != list_end (&pcb->children); ) {
+
     struct process_control_block *child_pcb = list_entry (e, struct process_control_block, child_elem);
-    hash_delete (&blocks, &child_pcb->blocks_elem);
-    free (child_pcb);
+    e = list_next (e);
+
+    if (child_pcb->has_exited)
+      free_pcb (child_pcb);
   }
+
+  struct process_control_block *parent_pcb = get_pcb_by_tid (pcb->parent_tid);
+
+  // If my parent has died and I want to die, then it is my responsiblity to free myself 
+  if (parent_pcb == NULL || parent_pcb->has_exited)
+    free_pcb (pcb);
+
+
+  
+
+  /*
+
+  A -> B -> C
+
+  A B C (B, C)
+  A C B (C, B)
+  B A C
+  B C A
+  C A B
+  C B A
+
+  A wants to die, B has died, free B
+  A has died, B wants to die, free B
+
+  My parent wants to die and I have died, then it is the parent responsiblity to free me
+  If my parent has died and I want to die, then it is my responsiblity to free myself
+
+  */
+  pcb->has_exited = true;
+
   intr_set_level (old_level);
 
   /* Destroy the current process's page directory and switch back
@@ -397,11 +451,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   file = filesys_open (file_name);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+
+  file_deny_write (file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -482,11 +539,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
+  pcb_add_file (get_pcb_by_tid (thread_current ()->tid), file);
   success = true;
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
