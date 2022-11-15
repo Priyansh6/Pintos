@@ -271,7 +271,7 @@ process_exit (void)
     free (child_pcb);
   }
   intr_set_level (old_level);
-  
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -724,12 +724,10 @@ pcb_remove_file (struct process_control_block *pcb, int fd) {
 /* Removes all files associated with process control block pcb. */
 void
 pcb_remove_all_files (struct process_control_block *pcb) {
-  if (!list_empty (&pcb->files)) {
-    struct list_elem *e;
-    for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
-      struct process_file *pfile = list_entry (e, struct process_file, list_elem);
-      process_file_close (pfile);
-    }
+  while (!list_empty (&pcb->files)) {
+    struct list_elem *e = list_begin (&pcb->files);
+    struct process_file *pfile = list_entry (e, struct process_file, list_elem);
+    process_file_close (pfile);
   }
 }
 
