@@ -203,7 +203,11 @@ create_handler (void *args[])
 static uint32_t 
 remove_handler (void *args[])
 {
-  return 0;
+  char ** filename = args[0];
+  lock_acquire (&fs_lock);
+  bool result = filesys_remove (*filename);
+  lock_release (&fs_lock);
+  return result;
 }
 
 /* Gets file with file decriptor fd from the current running process's process
