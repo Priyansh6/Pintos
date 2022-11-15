@@ -8,5 +8,6 @@ struct syscall {
 };
 
 void syscall_init (void);
+void exit_failure (void);
 
 #endif /* userprog/syscall.h */

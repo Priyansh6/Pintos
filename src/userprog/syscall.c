@@ -1,45 +1,68 @@
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "devices/input.h"
+#include "devices/shutdown.h"
+#include "hash.h"
+#include "filesys/filesys.h"
+#include "threads/malloc.h"
 
 /* There are 13 syscalls in task two. */
 #define N_SYSCALLS 13
 #define MAX_CONSOLE_BUFFER_OUTPUT 250
 #define MIN(x, y) ((x <= y) ? x : y)
 
+#define VALIDATE_USER_POINTER(type, x) is_valid_user_ptr ((type) (x))
+
 static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
-static void get_args (const void *esp, void *args[], int num_args);
-static bool validate_args (void *args[], int argc);
-static void exit_failure (void);
+static void get_args (void *esp, void *args[], int num_args);
+static void validate_args (void *args[], int argc);
 
+static struct file *get_file (int fd);
+static bool remove_file (int fd);
+static void assert_fd_greater_than (int fd, int highest_invalid_fd);
+static void assert_valid_fd (int fd);
+
+static uint32_t halt_handler(void *args[]);
 static uint32_t exit_handler (void *args[]);
-static uint32_t write_handler (void *args[]);
+static uint32_t exec_handler(void *args[]);
 static uint32_t wait_handler (void *args[]);
+static uint32_t create_handler (void *args[]);
+static uint32_t remove_handler (void *args[]);
+static uint32_t open_handler (void *args[]);
+static uint32_t filesize_handler (void *args[]);
+static uint32_t read_handler (void *args[]);
+static uint32_t write_handler (void *args[]);
+static uint32_t seek_handler (void *args[]);
+static uint32_t tell_handler (void *args[]);
+static uint32_t close_handler (void *args[]);
 
 static struct lock fs_lock;
 
 /* Map from system call number to the corresponding handler */
 static const struct syscall syscall_ptrs[] = {
+  {.handler = &halt_handler, .argc = 0},
   {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
+  {.handler = &exec_handler, .argc = 1},
   {.handler = &wait_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
+  {.handler = &create_handler, .argc = 2},
+  {.handler = &remove_handler, .argc = 1},
+  {.handler = &open_handler, .argc = 1},
+  {.handler = &filesize_handler, .argc = 1},
+  {.handler = &read_handler, .argc = 3},
   {.handler = &write_handler, .argc = 3},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
-  {.handler = &exit_handler, .argc = 1},
+  {.handler = &seek_handler, .argc = 2},
+  {.handler = &tell_handler, .argc = 1},
+  {.handler = &close_handler, .argc = 1},
 };
 
 void
@@ -60,9 +83,12 @@ syscall_handler (struct intr_frame *f)
     void *args[syscall.argc];
     get_args (f->esp, args, syscall.argc);
 
-    /* Make sure that we can dereference all arguments safely. */
-    if (!validate_args (args, syscall.argc))
-      exit_failure ();
+    /* Make sure that we can dereference all arguments safely. If any arguments
+       are pointers (e.g char *) then we will need to validate these pointers
+       separately in their respective system call handlers. 
+       
+       If any of the arguments fail validation, we exit the user program. */
+    validate_args (args, syscall.argc);
     
     /* Make call to corresponding system call handler and put the return value 
        in the eax register. It's okay to do this even when we don't expect a return
@@ -75,7 +101,7 @@ syscall_handler (struct intr_frame *f)
 
 /* If the user provides an invalid system call number, we handle 
    it gracefully by terminating the user thread. */
-static void
+void
 exit_failure (void)
 {
   int status = -1;
@@ -84,26 +110,53 @@ exit_failure (void)
 }
 
 static void
-get_args (const void *esp, void *args[], int num_args)
+get_args (void *esp, void *args[], int num_args)
 {
   for (int i = 0; i < num_args; i++)
     args[i] = esp + (sizeof(void *) * (i + 1));
 }
 
+/* Verifies that: (i) uaddr is not null, (ii) address is within the user memory space
+   and (iii) that the address maps to a valid page. */
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
   return uaddr && is_user_vaddr (uaddr) && pagedir_get_page (thread_current ()->pagedir, uaddr);
 }
 
-static bool
+/* Every argument that the uses passes is a pointer - this function
+   goes through each byte of each pointer to verify that we can
+   dereference it (by a call to is_valid_user_ptr). */
+static void
 validate_args (void *args[], int argc)
 {
   for (int i = 0; i < argc; i++) {
-    if (!is_valid_user_ptr (args[i]))
-      return false;
+    for (unsigned j = 0; j < sizeof (void *); j++) {
+      if (!is_valid_user_ptr (args[i] + j))
+        exit_failure ();
+    }
   }
-  return true;
+}
+
+static void
+free_hash_elem(struct hash_elem *e, void *aux UNUSED)
+{
+  struct process_control_block *pcb = hash_entry (e, struct process_control_block, blocks_elem);
+  free(pcb);
+}
+
+static uint32_t
+halt_handler (void *args[] UNUSED)
+{
+  //free all entries in blocks hash table and the table itself
+  hash_destroy(&blocks, free_hash_elem);
+
+  //shutdown pintos
+  shutdown_power_off();
+  destroy_initial_process ();
+  thread_exit ();
+  //should never get here
+  return 0;
 }
 
 static uint32_t
@@ -119,28 +172,214 @@ exit_handler (void *args[])
 }
 
 static uint32_t
+exec_handler(void *args[]) 
+{
+  const char **cmd = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *cmd))
+    exit_failure ();
+
+  tid_t tid = process_execute (*cmd);
+  struct process_control_block *pcb = get_pcb_by_tid (tid);
+  sema_down (&pcb->load_sema);
+  return pcb->has_loaded ? tid : -1;
+}
+
+static uint32_t
 wait_handler (void *args[]) 
 {
   tid_t *tid = args[0];
   return process_wait (*tid);
 }
 
+//creates a new file on the filesys
+//NOT TESTED
+static uint32_t 
+create_handler (void *args[])
+{
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+
+  off_t *initial_size = args[1];
+
+  lock_acquire(&fs_lock);
+  bool success = filesys_create(*file, *initial_size);
+  lock_release(&fs_lock);
+  return success;
+
+}
+
+static uint32_t 
+remove_handler (void *args[])
+{
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+
+  lock_acquire (&fs_lock);
+  bool result = filesys_remove (*file);
+  lock_release (&fs_lock);
+  return result;
+}
+
+/* Gets file with file decriptor fd from the current running process's process
+   control block. Calls exit_failure if a file was not found. */
+static struct file *
+get_file (int fd) {
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  struct file *file = pcb_get_file (pcb, fd);
+  if (file == NULL)
+    exit_failure ();
+  return file;
+}
+
+/* Removes file with file descriptor fd from the current running process's process
+   control block and frees it from memory. Returns whether a file was removed. */
+static bool
+remove_file (int fd) {
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  return pcb_remove_file (pcb, fd);
+}
+
+/* Calls exit failure if fd is greater than highest_invalid_fd. */
+static void
+assert_fd_greater_than (int fd, int highest_invalid_fd) {
+  if (fd <= highest_invalid_fd)
+    exit_failure ();
+}
+
+/* Checks if provided file descriptor is valid (greater than 0) and calls exit_failure
+   if it isn't. */
+static void
+assert_valid_fd (int fd) {
+  assert_fd_greater_than (fd, -1);
+}
+
+static uint32_t 
+open_handler (void *args[])
+{
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+  
+  lock_acquire (&fs_lock);
+  struct file *opened_file = filesys_open(*file);
+  if (opened_file == NULL) {
+    lock_release (&fs_lock);
+    return -1;
+  }
+
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  int fd = pcb_add_file (pcb, opened_file);
+  if (fd < 0)
+    file_close (opened_file);
+
+  lock_release (&fs_lock);
+  return fd;
+}
+
+static uint32_t 
+filesize_handler (void *args[])
+{
+  int *fd = args[0];
+  assert_fd_greater_than (*fd, 1);
+
+  lock_acquire (&fs_lock);
+  struct file *file = get_file (*fd);
+  uint32_t length = file_length (file);
+  lock_release (&fs_lock);
+  return length;
+}
+
+static uint32_t 
+read_handler (void *args[])
+{
+  int *fd = args[0];
+  char **buffer = args[1];
+  uint32_t *size = args[2];
+  assert_valid_fd (*fd);
+
+  if (!VALIDATE_USER_POINTER (char *, *buffer))
+    exit_failure ();
+
+  switch (*fd) {
+    case 0:
+      for (uint32_t i = 0; i < *size; i++) {
+        *buffer[i] = input_getc ();
+      }
+      return *size;
+    case 1:
+      exit_failure ();
+      return 0;
+    default:
+      lock_acquire (&fs_lock);
+      uint32_t bytes_read = file_read (get_file(*fd), *buffer, *size);
+      lock_release (&fs_lock);
+      return bytes_read;
+  }
+}
+
 static uint32_t
 write_handler (void *args[])
 {
-
   int *fd = args[0];
   char **buffer = args[1];
-  int *size = args[2];
+  uint32_t *size = args[2];
+  assert_valid_fd (*fd);
+
+  if (!VALIDATE_USER_POINTER (char *, *buffer))
+    exit_failure ();
 
   switch (*fd) {
+    case 0:
+      exit_failure ();
+      return 0;
     case 1:
-      for (int i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT) {
+      for (uint32_t i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT) {
         putbuf (*(buffer) + i, MIN(MAX_CONSOLE_BUFFER_OUTPUT, *size - i));
       }
       return *size;
     default:
-      return 0;
+      lock_acquire (&fs_lock);
+      uint32_t bytes_written = file_write (get_file(*fd), *buffer, *size);
+      lock_release (&fs_lock);
+      return bytes_written;
   }
+}
 
+static uint32_t 
+seek_handler (void *args[])
+{
+  int *fd = args[0];
+  uint32_t *position = args[1];
+
+  struct file *file = get_file (*fd);
+  lock_acquire (&fs_lock);
+  file_seek (file, *position);
+  lock_release (&fs_lock);
+  return 0;
+}
+
+static uint32_t 
+tell_handler (void *args[]) 
+{
+  int *fd = args[0];
+  lock_acquire (&fs_lock);
+  struct file *file = get_file (*fd);
+  uint32_t position = file_tell (file);
+  lock_release (&fs_lock);
+  return position;
+}
+
+static uint32_t 
+close_handler (void *args[])
+// TODO: CLOSE ALL FILES ASSOCIATED WITH PROCESS WHEN IT EXITS
+{
+  int *fd = args[0];
+  assert_fd_greater_than (*fd, 1);
+
+  lock_acquire (&fs_lock);
+  remove_file (*fd);
+  lock_release (&fs_lock);
+  return 0;
 }

@@ -10,7 +10,6 @@
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
-#include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "threads/flags.h"
 #include "threads/init.h"
@@ -26,7 +25,6 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static bool process_control_block_init (tid_t tid);
 
 /* Initialises the hash map used to map processes to their process control blocks
    and creates a process control block for the first user process (which allows
@@ -34,11 +32,22 @@ static bool process_control_block_init (tid_t tid);
    
    Since the main thread has tid 1 and the idle thread has tid 2, the first user process
    will have tid 3 (INITIAL_USER_PROCESS_TID). */
+static bool process_control_block_init (tid_t tid);
+static void process_file_close (struct process_file *pfile);
+
 void
 init_process () 
 {
   hash_init (&blocks, &block_hash, &tid_less, NULL);
   process_control_block_init (INITIAL_USER_PROCESS_TID);
+}
+
+void
+free_pcb (struct process_control_block *pcb)
+{
+  hash_delete (&blocks, &pcb->blocks_elem);
+
+  free (pcb);
 }
 
 /* Called when the main thread is about to exit. Frees and deletes the process
@@ -64,14 +73,31 @@ process_control_block_init (tid_t tid)
     return false;
 
   block->tid = tid;
+  block->parent_tid = thread_current ()->tid;
   block->status = -1;
+  block->has_exited = false;
   block->was_waited_on = false;
+  block->next_fd = 2;
   sema_init (&block->wait_sema, 0);
-  list_init (&block->children); 
+  sema_init (&block->load_sema, 0);
+  list_init (&block->children);
+  list_init (&block->files);
 
   hash_insert (&blocks, &block->blocks_elem);
 
+  struct process_control_block *parent_block = get_pcb_by_tid (thread_current ()->tid);
+
+  if (parent_block != NULL)
+    list_push_back (&parent_block->children, &block->child_elem);
+
   return true;
+}
+
+static void
+process_file_close (struct process_file *pfile) {
+  list_remove (&pfile->list_elem);
+  file_close (pfile->file);
+  free (pfile);
 }
 
 /* Starts a new thread running a user program loaded from
@@ -106,6 +132,8 @@ process_execute (const char *file_name)
       return TID_ERROR;
     memcpy (args[last], token, strlen(token) + 1);
   }
+
+  args[last] = NULL;
   
   free (fn_copy);
 
@@ -115,6 +143,13 @@ process_execute (const char *file_name)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (args[0], PRI_DEFAULT, start_process, args);
+
+  /* If the process is not the initial user process, then we create a process
+     control block for it. We have already made a process control block for the
+     initial user process, so we don't want to recreate it here. */
+  if (tid != INITIAL_USER_PROCESS_TID)
+    process_control_block_init (tid);
+
   if (tid == TID_ERROR)
     palloc_free_page (args);
 
@@ -137,6 +172,19 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (args[0], &if_.eip, &if_.esp);
+
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  pcb->has_loaded = success;
+  sema_up (&pcb->load_sema);
+
+  /* If load failed, quit. */
+  if (!success) {
+    for (int argc = 0; args[argc] != NULL; argc++) {
+      free (args[argc]);
+    }
+    palloc_free_page (args);
+    thread_exit ();
+  }
 
   /* We use these variables to keep track of the original stack pointer
      address (esp_start) and to mark the address of the first character
@@ -183,16 +231,6 @@ start_process (void *file_name_)
   PUSH_STACK (char **, if_.esp, ((char **) if_.esp) + 1);
   PUSH_STACK (int, if_.esp, argc);
   PUSH_STACK (int, if_.esp, 0);
-
-  /* If the process is not the initial user process, then we create a process
-     control block for it. We have already made a process control block for the
-     initial user process, so we don't want to recreate it here. */
-  if (thread_current ()->tid != INITIAL_USER_PROCESS_TID)
-    process_control_block_init (thread_current ()->tid);
-
-  /* If load failed, quit. */
-  if (!success)
-    thread_exit ();
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -241,14 +279,53 @@ process_exit (void)
   struct list_elem *e;
 
   // TODO: THINK ABOUT SYNCHRONIZATION
-  enum intr_level old_level = intr_disable ();
-  for (e = list_begin (&pcb->children); e != list_end (&pcb->children); e = list_next (e)) {
-    struct process_control_block *child_pcb = list_entry (e, struct process_control_block, child_elem);
-    hash_delete (&blocks, &child_pcb->blocks_elem);
-    free (child_pcb);
-  }
-  intr_set_level (old_level);
   
+  enum intr_level old_level = intr_disable ();
+  
+  // I want to die and for all my children (my child has died, then it is my responsiblity to free my dead child)
+
+  pcb_remove_all_files (pcb);
+
+  for (e = list_begin (&pcb->children); e != list_end (&pcb->children); ) {
+
+    struct process_control_block *child_pcb = list_entry (e, struct process_control_block, child_elem);
+    e = list_next (e);
+
+    if (child_pcb->has_exited)
+      free_pcb (child_pcb);
+  }
+
+  struct process_control_block *parent_pcb = get_pcb_by_tid (pcb->parent_tid);
+
+  // If my parent has died and I want to die, then it is my responsiblity to free myself 
+  if (parent_pcb == NULL || parent_pcb->has_exited)
+    free_pcb (pcb);
+
+
+  
+
+  /*
+
+  A -> B -> C
+
+  A B C (B, C)
+  A C B (C, B)
+  B A C
+  B C A
+  C A B
+  C B A
+
+  A wants to die, B has died, free B
+  A has died, B wants to die, free B
+
+  My parent wants to die and I have died, then it is the parent responsiblity to free me
+  If my parent has died and I want to die, then it is my responsiblity to free myself
+
+  */
+  pcb->has_exited = true;
+
+  intr_set_level (old_level);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -374,11 +451,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   file = filesys_open (file_name);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+
+  file_deny_write (file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -459,11 +539,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
+  pcb_add_file (get_pcb_by_tid (thread_current ()->tid), file);
   success = true;
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
@@ -641,6 +721,71 @@ get_pcb_by_tid (tid_t tid)
   e = hash_find (&blocks, &pcb.blocks_elem);
 
   return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
+}
+
+/* Adds a file to a process's pcb as well as assigning it a file descriptor, which it returns. Returns -1 if fails */
+int
+pcb_add_file (struct process_control_block *pcb, struct file* file) {
+  struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
+  if (pfile == NULL)
+    return -1;
+
+  int assigned_fd = pcb->next_fd++;
+  pfile->fd = assigned_fd;
+  pfile->file = file;
+  list_push_back (&pcb->files, &pfile->list_elem);
+  
+  return assigned_fd;
+}
+
+/* Returns process_file struct associated with file descriptor fd in the provided pcb or
+   NULL if no file could be found. */
+static struct process_file *
+pcb_get_process_file (struct process_control_block *pcb, int fd) {
+  if (!list_empty (&pcb->files)) {
+    struct list_elem *e;
+    for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
+      struct process_file *pfile = list_entry (e, struct process_file, list_elem);
+      if (pfile->fd == fd) {
+        return pfile;
+      }
+      if (pfile->fd > fd) {
+        return NULL;
+      }
+    }
+  }
+  return NULL;
+}
+
+/* Returns file struct associated with file descriptor fd in the provided pcb or
+   NULL if no file could be found. */
+struct file *
+pcb_get_file (struct process_control_block *pcb, int fd)
+{
+  struct process_file *pfile = pcb_get_process_file (pcb, fd);
+  return pfile == NULL ? NULL : pfile->file;
+}
+
+/* Removes file with file descriptor fd from process control block pcb.
+   Returns true if a file is removed. */
+bool
+pcb_remove_file (struct process_control_block *pcb, int fd) {
+  struct process_file *pfile = pcb_get_process_file (pcb, fd);
+  if (pfile == NULL) {
+    return false;
+  }
+  process_file_close (pfile);
+  return true;
+}
+
+/* Removes all files associated with process control block pcb. */
+void
+pcb_remove_all_files (struct process_control_block *pcb) {
+  while (!list_empty (&pcb->files)) {
+    struct list_elem *e = list_begin (&pcb->files);
+    struct process_file *pfile = list_entry (e, struct process_file, list_elem);
+    process_file_close (pfile);
+  }
 }
 
 /* Compares process_control_blocks on the basis of their associated tid. */
