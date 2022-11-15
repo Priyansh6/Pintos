@@ -20,10 +20,12 @@
 #define MAX_CONSOLE_BUFFER_OUTPUT 250
 #define MIN(x, y) ((x <= y) ? x : y)
 
+#define VALIDATE_USER_POINTER(type, x) is_valid_user_ptr ((type) (x))
+
 static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
 static void get_args (void *esp, void *args[], int num_args);
-static bool validate_args (void *args[], int argc);
+static void validate_args (void *args[], int argc);
 static void exit_failure (void);
 
 static struct file *get_file (int fd);
@@ -82,9 +84,12 @@ syscall_handler (struct intr_frame *f)
     void *args[syscall.argc];
     get_args (f->esp, args, syscall.argc);
 
-    /* Make sure that we can dereference all arguments safely. */
-    if (!validate_args (args, syscall.argc))
-      exit_failure ();
+    /* Make sure that we can dereference all arguments safely. If any arguments
+       are pointers (e.g char *) then we will need to validate these pointers
+       separately in their respective system call handlers. 
+       
+       If any of the arguments fail validation, we exit the user program. */
+    validate_args (args, syscall.argc);
     
     /* Make call to corresponding system call handler and put the return value 
        in the eax register. It's okay to do this even when we don't expect a return
@@ -112,20 +117,26 @@ get_args (void *esp, void *args[], int num_args)
     args[i] = esp + (sizeof(void *) * (i + 1));
 }
 
+/* Verifies that: (i) uaddr is not null, (ii) address is within the user memory space
+   and (iii) that the address maps to a valid page. */
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
   return uaddr && is_user_vaddr (uaddr) && pagedir_get_page (thread_current ()->pagedir, uaddr);
 }
 
-static bool
+/* Every argument that the uses passes is a pointer - this function
+   goes through each byte of each pointer to verify that we can
+   dereference it (by a call to is_valid_user_ptr). */
+static void
 validate_args (void *args[], int argc)
 {
   for (int i = 0; i < argc; i++) {
-    if (!is_valid_user_ptr (args[i]))
-      return false;
+    for (unsigned j = 0; j < sizeof (void *); j++) {
+      if (!is_valid_user_ptr (args[i] + j))
+      exit_failure ();
+    }
   }
-  return true;
 }
 
 static void
@@ -164,10 +175,11 @@ exit_handler (void *args[])
 static uint32_t
 exec_handler(void *args[]) 
 {
- // if (!is_valid_user_ptr ((const char **) args[0]))
- //   return -1;
-  
-  tid_t tid = process_execute (*((const char **) args[0]));
+  const char **cmd = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *cmd))
+    exit_failure ();
+
+  tid_t tid = process_execute (*cmd);
   struct process_control_block *pcb = get_pcb_by_tid (tid);
   sema_down (&pcb->load_sema);
   return pcb->has_loaded ? tid : -1;
@@ -185,7 +197,10 @@ wait_handler (void *args[])
 static uint32_t 
 create_handler (void *args[])
 {
-  char **file = args[0];
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+
   off_t *initial_size = args[1];
 
   //locking across file system
@@ -203,6 +218,10 @@ create_handler (void *args[])
 static uint32_t 
 remove_handler (void *args[])
 {
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+
   return 0;
 }
 
@@ -242,7 +261,11 @@ assert_valid_fd (int fd) {
 static uint32_t 
 open_handler (void *args[])
 {
-  char **file = args[0];
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+
+  // Think this is no longer necessary but don't want to remove without confirming
   if (*file == NULL)
     return -1;
   
@@ -297,6 +320,9 @@ write_handler (void *args[])
   char **buffer = args[1];
   uint32_t *size = args[2];
   assert_valid_fd (*fd);
+
+  if (!VALIDATE_USER_POINTER (char *, *buffer))
+    exit_failure ();
 
   switch (*fd) {
     case 0:
