@@ -26,7 +26,6 @@ static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
 static void get_args (void *esp, void *args[], int num_args);
 static void validate_args (void *args[], int argc);
-static void exit_failure (void);
 
 static struct file *get_file (int fd);
 static bool remove_file (int fd);
@@ -102,7 +101,7 @@ syscall_handler (struct intr_frame *f)
 
 /* If the user provides an invalid system call number, we handle 
    it gracefully by terminating the user thread. */
-static void
+void
 exit_failure (void)
 {
   int status = -1;
@@ -134,7 +133,7 @@ validate_args (void *args[], int argc)
   for (int i = 0; i < argc; i++) {
     for (unsigned j = 0; j < sizeof (void *); j++) {
       if (!is_valid_user_ptr (args[i] + j))
-      exit_failure ();
+        exit_failure ();
     }
   }
 }
