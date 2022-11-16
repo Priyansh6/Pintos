@@ -37,7 +37,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static bool process_control_block_init (tid_t tid);
 static struct process_control_block *get_pcb_by_tid (tid_t tid);
 static struct process_control_block *process_get_pcb (void);
-static void free_pcb (struct process_control_block *pcb);
+static void pcb_free (struct process_control_block *pcb);
 static void pcb_hash_free(struct hash_elem *e, void *aux UNUSED);
 
 static void process_file_close (struct process_control_block *pcb, struct process_file *pfile);
@@ -111,7 +111,6 @@ init_process (void)
 static bool
 process_control_block_init (tid_t tid)
 {
-
   /* This is freed either by a process or it's parent's process in process_exit. As
      a special case, the main thread will free the PCB for the first user process created
      in destroy_blocks. */
@@ -171,7 +170,7 @@ process_get_pcb (void)
 /* Deletes the reference to a given PCB from the PCB hash map and
    free the memory allocated to the given PCB. */
 static void
-free_pcb (struct process_control_block *pcb)
+pcb_free (struct process_control_block *pcb)
 {
   hash_delete (&blocks, &pcb->blocks_elem);
   hash_destroy (&pcb->files, NULL);
@@ -467,14 +466,14 @@ process_exit (void)
 
     /* Free our child's PCB if it has exited. */
     if (child_pcb->has_exited)
-      free_pcb (child_pcb);
+      pcb_free (child_pcb);
   }
 
   /* If we were still alive whilst our parent process was exiting, our PCB won't have 
      been freed. Therefore, it is our responsibility to free our own PCB. */
   struct process_control_block *parent_pcb = get_pcb_by_tid (pcb->parent_tid);
   if (parent_pcb == NULL || parent_pcb->has_exited)
-    free_pcb (pcb);
+    pcb_free (pcb);
 
   /* Mark our process as having exited, so our parent and children know (needed when they exit to ensure
      all PCBs are freed).*/
