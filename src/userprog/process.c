@@ -33,6 +33,13 @@ static void process_file_close (struct process_file *pfile);
 static void free_pcb (struct process_control_block *pcb);
 static bool is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write);
 
+static bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
+static unsigned block_hash (const struct hash_elem *elem, void *aux UNUSED);
+
+static bool fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
+static unsigned process_file_hash (const struct hash_elem *elem, void *aux UNUSED);
+static void process_file_hash_close (struct hash_elem *e, void *aux UNUSED);
+
 /* Called in init.c when Pintos first starts up (and is running a user program).
    Initialises the PCB hash map and creates a PCB for the first user process thread
    (i.e first thread which is not MAIN or IDLE). */
@@ -92,7 +99,7 @@ process_control_block_init (tid_t tid)
   sema_init (&block->wait_sema, 0);
   sema_init (&block->load_sema, 0);
   list_init (&block->children);
-  list_init (&block->files);
+  hash_init (&block->files, process_file_hash, fd_less, NULL);
 
   hash_insert (&blocks, &block->blocks_elem);
 
@@ -104,11 +111,18 @@ process_control_block_init (tid_t tid)
   return true;
 }
 
+/* Closes and frees file pointed to by process_file pfile */
 static void
 process_file_close (struct process_file *pfile) {
-  list_remove (&pfile->list_elem);
   file_close (pfile->file);
   free (pfile);
+}
+
+/* Executes process_file_close on process_file associated with hash_elem e */
+static void
+process_file_hash_close (struct hash_elem *e, void *aux UNUSED) {
+  struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
+  process_file_close (pfile);
 }
 
 /* Calculate how many bytes would be pushed to the stack for the current
@@ -773,11 +787,18 @@ get_pcb_by_tid (tid_t tid)
   return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
 }
 
+/* Returns the current process's process control block. */
+static struct process_control_block *
+process_get_pcb (void) {
+  return get_pcb_by_tid (thread_current ()->tid);
+}
+
 /* Adds a file to current process's pcb as well as assigning it a file 
    descriptor, which it returns. Returns -1 if fails */
 int
 process_add_file (struct file* file) {
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()-> tid);
+  struct process_control_block *pcb = process_get_pcb ();
+
   struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
   if (pfile == NULL)
     return -1;
@@ -785,29 +806,24 @@ process_add_file (struct file* file) {
   int assigned_fd = pcb->next_fd++;
   pfile->fd = assigned_fd;
   pfile->file = file;
-  list_push_back (&pcb->files, &pfile->list_elem);
+
+  if (hash_insert (&pcb->files, &pfile->hash_elem))
+    return -1;
   
   return assigned_fd;
 }
 
-/* Returns process_file struct associated with file descriptor fd in the provided pcb or
+/* Returns process_file struct associated with file descriptor fd in the current process's pcb or
    NULL if no file could be found. */
 static struct process_file *
 process_get_process_file (int fd) {
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  if (!list_empty (&pcb->files)) {
-    struct list_elem *e;
-    for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
-      struct process_file *pfile = list_entry (e, struct process_file, list_elem);
-      if (pfile->fd == fd) {
-        return pfile;
-      }
-      if (pfile->fd > fd) {
-        return NULL;
-      }
-    }
-  }
-  return NULL;
+  struct process_control_block *pcb = process_get_pcb ();
+
+  struct process_file pfile;
+  pfile.fd = fd;
+
+  struct hash_elem *found_elem = hash_find (&pcb->files, &pfile.hash_elem);
+  return found_elem == NULL ? NULL : hash_entry (found_elem, struct process_file, hash_elem);
 }
 
 /* Returns file struct associated with file descriptor fd in the current process's pcb or
@@ -827,6 +843,8 @@ process_remove_file (int fd) {
   if (pfile == NULL) {
     return false;
   }
+
+  hash_delete (&process_get_pcb ()->files, &pfile->hash_elem);
   process_file_close (pfile);
   return true;
 }
@@ -834,25 +852,41 @@ process_remove_file (int fd) {
 /* Removes all files associated with current process's pcb. */
 void
 process_remove_all_files (void) {
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  while (!list_empty (&pcb->files)) {
-    struct list_elem *e = list_begin (&pcb->files);
-    struct process_file *pfile = list_entry (e, struct process_file, list_elem);
-    process_file_close (pfile);
-  }
+  struct process_control_block *pcb = process_get_pcb ();
+
+  hash_clear (&pcb->files, process_file_hash_close);
 }
 
 /* Compares process_control_blocks on the basis of their associated tid. */
-bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
+static bool 
+tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
   const struct process_control_block *pcb_a = hash_entry (a, struct process_control_block, blocks_elem);
   const struct process_control_block *pcb_b = hash_entry (b, struct process_control_block, blocks_elem);
 
   return pcb_a->tid < pcb_b->tid;
 }
 
-/* Hashes the tid field of a process control block*/
-unsigned int block_hash (const struct hash_elem *elem, void *aux UNUSED) {
+/* Hashes the tid field of a process control block */
+static unsigned 
+block_hash (const struct hash_elem *elem, void *aux UNUSED) {
   const struct process_control_block *pcb = hash_entry (elem, struct process_control_block, blocks_elem);
 
   return hash_int (pcb->tid);
+}
+
+/* Compares process_files on the basis of their associated file descriptors. */
+static bool 
+fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
+  const struct process_file *pfile_a = hash_entry (a, struct process_file, hash_elem);
+  const struct process_file *pfile_b = hash_entry (b, struct process_file, hash_elem);
+
+  return pfile_a->fd < pfile_b->fd;
+}
+
+/* Hashes the fd field of a process file */
+static unsigned 
+process_file_hash (const struct hash_elem *elem, void *aux UNUSED) {
+  const struct process_file *pfile = hash_entry (elem, struct process_file, hash_elem);
+
+  return hash_int (pfile->fd);
 }
