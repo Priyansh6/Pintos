@@ -53,10 +53,10 @@ void process_exit (void);
 void process_activate (void);
 
 struct process_control_block *get_pcb_by_tid (tid_t tid);
-int pcb_add_file (struct process_control_block *pcb, struct file* file);
-struct file *pcb_get_file (struct process_control_block *pcb, int fb);
-bool pcb_remove_file (struct process_control_block *pcb, int fd);
-void pcb_remove_all_files (struct process_control_block *pcb);
+int process_add_file (struct file* file);
+struct file *process_get_file (int fb);
+bool process_remove_file (int fd);
+void process_remove_all_files (void);
 bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 unsigned int block_hash (const struct hash_elem *elem, void *aux UNUSED);
 

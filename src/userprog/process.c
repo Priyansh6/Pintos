@@ -296,7 +296,7 @@ process_exit (void)
   /* Close all files open by the current process and remove all
      files from our PCB's file list. Also handles re-allowing writes
      to our executable. */
-  pcb_remove_all_files (pcb);
+  process_remove_all_files ();
 
   enum intr_level old_level = intr_disable ();
 
@@ -542,7 +542,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* We add our own executable file to our PCB's files list, so that 
      we re-allow writing to it once we exit. */
-  pcb_add_file (get_pcb_by_tid (thread_current ()->tid), file);
+  process_add_file (file);
   success = true;
 
  done:
@@ -726,9 +726,11 @@ get_pcb_by_tid (tid_t tid)
   return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
 }
 
-/* Adds a file to a process's pcb as well as assigning it a file descriptor, which it returns. Returns -1 if fails */
+/* Adds a file to current process's pcb as well as assigning it a file 
+   descriptor, which it returns. Returns -1 if fails */
 int
-pcb_add_file (struct process_control_block *pcb, struct file* file) {
+process_add_file (struct file* file) {
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()-> tid);
   struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
   if (pfile == NULL)
     return -1;
@@ -744,7 +746,8 @@ pcb_add_file (struct process_control_block *pcb, struct file* file) {
 /* Returns process_file struct associated with file descriptor fd in the provided pcb or
    NULL if no file could be found. */
 static struct process_file *
-pcb_get_process_file (struct process_control_block *pcb, int fd) {
+process_get_process_file (int fd) {
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   if (!list_empty (&pcb->files)) {
     struct list_elem *e;
     for (e = list_begin (&pcb->files); e != list_end (&pcb->files); e = list_next(e)) {
@@ -760,20 +763,20 @@ pcb_get_process_file (struct process_control_block *pcb, int fd) {
   return NULL;
 }
 
-/* Returns file struct associated with file descriptor fd in the provided pcb or
+/* Returns file struct associated with file descriptor fd in the current process's pcb or
    NULL if no file could be found. */
 struct file *
-pcb_get_file (struct process_control_block *pcb, int fd)
+process_get_file (int fd)
 {
-  struct process_file *pfile = pcb_get_process_file (pcb, fd);
+  struct process_file *pfile = process_get_process_file (fd);
   return pfile == NULL ? NULL : pfile->file;
 }
 
-/* Removes file with file descriptor fd from process control block pcb.
+/* Removes file with file descriptor fd from current process's pcb.
    Returns true if a file is removed. */
 bool
-pcb_remove_file (struct process_control_block *pcb, int fd) {
-  struct process_file *pfile = pcb_get_process_file (pcb, fd);
+process_remove_file (int fd) {
+  struct process_file *pfile = process_get_process_file (fd);
   if (pfile == NULL) {
     return false;
   }
@@ -781,9 +784,10 @@ pcb_remove_file (struct process_control_block *pcb, int fd) {
   return true;
 }
 
-/* Removes all files associated with process control block pcb. */
+/* Removes all files associated with current process's pcb. */
 void
-pcb_remove_all_files (struct process_control_block *pcb) {
+process_remove_all_files (void) {
+  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   while (!list_empty (&pcb->files)) {
     struct list_elem *e = list_begin (&pcb->files);
     struct process_file *pfile = list_entry (e, struct process_file, list_elem);

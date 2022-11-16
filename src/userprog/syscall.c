@@ -27,8 +27,6 @@ static bool is_valid_user_ptr (void *uaddr);
 static void get_args (void *esp, void *args[], int num_args);
 static void validate_args (void *args[], int argc);
 
-static struct file *get_file (int fd);
-static bool remove_file (int fd);
 static void assert_fd_greater_than (int fd, int highest_invalid_fd);
 static void assert_valid_fd (int fd);
 
@@ -150,25 +148,6 @@ free_hash_elem(struct hash_elem *e, void *aux UNUSED)
 {
   struct process_control_block *pcb = hash_entry (e, struct process_control_block, blocks_elem);
   free(pcb);
-}
-
-/* Gets file with file decriptor fd from the current running process's process
-   control block. Calls exit_failure if a file was not found. */
-static struct file *
-get_file (int fd) {
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  struct file *file = pcb_get_file (pcb, fd);
-  if (file == NULL)
-    exit_failure ();
-  return file;
-}
-
-/* Removes file with file descriptor fd from the current running process's process
-   control block and frees it from memory. Returns whether a file was removed. */
-static bool
-remove_file (int fd) {
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  return pcb_remove_file (pcb, fd);
 }
 
 /* Calls exit failure if fd is greater than highest_invalid_fd. */
@@ -294,10 +273,11 @@ open_handler (void *args[])
     return -1;
   }
 
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  int fd = pcb_add_file (pcb, opened_file);
-  if (fd < 0)
+  int fd = process_add_file (opened_file);
+  if (fd < 0) {
     file_close (opened_file);
+    return -1;
+  }
 
   lock_release (&fs_lock);
   return fd;
@@ -310,8 +290,11 @@ filesize_handler (void *args[])
   int *fd = args[0];
   assert_fd_greater_than (*fd, 1);
 
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
   lock_acquire (&fs_lock);
-  struct file *file = get_file (*fd);
   uint32_t length = file_length (file);
   lock_release (&fs_lock);
   return length;
@@ -346,8 +329,12 @@ read_handler (void *args[])
       return 0;
     default:
       /* Read from a file on the file system into the buffer.*/
+      struct file *file = process_get_file (*fd);
+      if (file == NULL)
+        exit_failure ();
+
       lock_acquire (&fs_lock);
-      uint32_t bytes_read = file_read (get_file(*fd), *buffer, *size);
+      uint32_t bytes_read = file_read (file, *buffer, *size);
       lock_release (&fs_lock);
       return bytes_read;
   }
@@ -378,9 +365,13 @@ write_handler (void *args[])
         putbuf (*(buffer) + i, MIN(MAX_CONSOLE_BUFFER_OUTPUT, *size - i));
       return *size;
     default:
+      struct file *file = process_get_file (*fd);
+      if (file == NULL)
+        exit_failure ();
+
       /* Write the contents of the buffer to a file. */
       lock_acquire (&fs_lock);
-      uint32_t bytes_written = file_write (get_file(*fd), *buffer, *size);
+      uint32_t bytes_written = file_write (file, *buffer, *size);
       lock_release (&fs_lock);
       return bytes_written;
   }
@@ -394,7 +385,10 @@ seek_handler (void *args[])
   int *fd = args[0];
   uint32_t *position = args[1];
 
-  struct file *file = get_file (*fd);
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
   lock_acquire (&fs_lock);
   file_seek (file, *position);
   lock_release (&fs_lock);
@@ -407,8 +401,11 @@ static uint32_t
 tell_handler (void *args[]) 
 {
   int *fd = args[0];
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
   lock_acquire (&fs_lock);
-  struct file *file = get_file (*fd);
   uint32_t position = file_tell (file);
   lock_release (&fs_lock);
   return position;
@@ -422,8 +419,12 @@ close_handler (void *args[])
   int *fd = args[0];
   assert_fd_greater_than (*fd, 1);
 
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
   lock_acquire (&fs_lock);
-  remove_file (*fd);
+  process_remove_file (*fd);
   lock_release (&fs_lock);
   return 0;
 }
