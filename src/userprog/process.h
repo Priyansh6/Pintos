@@ -30,7 +30,7 @@ struct process_control_block {
   struct list_elem child_elem;    /* Required to embed process_control_blocks in a struct list. */
 
   int next_fd;                    /* Contains the next possible file descriptor for this process */
-  struct list files;              /* Map from file descriptors to struct process_file */
+  struct hash files;              /* Map from file descriptors to struct process_file */
 };
 
 /* This struct is used to store pointers to files associated with processes
@@ -39,7 +39,7 @@ struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
 
-  struct list_elem list_elem;     /* Enables process_file to be in files list of process_control_block. */
+  struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
 
 /* Map from pid_t to struct process_control_block */
@@ -57,7 +57,5 @@ int process_add_file (struct file* file);
 struct file *process_get_file (int fb);
 bool process_remove_file (int fd);
 void process_remove_all_files (void);
-bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
-unsigned int block_hash (const struct hash_elem *elem, void *aux UNUSED);
 
 #endif /* userprog/process.h */
