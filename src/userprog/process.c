@@ -26,15 +26,13 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-/* Initialises the hash map used to map processes to their process control blocks
-   and creates a process control block for the first user process (which allows
-   the main thread to wait on it). 
-   
-   Since the main thread has tid 1 and the idle thread has tid 2, the first user process
-   will have tid 3 (INITIAL_USER_PROCESS_TID). */
 static bool process_control_block_init (tid_t tid);
 static void process_file_close (struct process_file *pfile);
+static void free_pcb (struct process_control_block *pcb);
 
+/* Called in init.c when Pintos first starts up (and is running a user program).
+   Initialises the PCB hash map and creates a PCB for the first user process thread
+   (i.e first thread which is not MAIN or IDLE). */
 void
 init_process () 
 {
@@ -42,16 +40,17 @@ init_process ()
   process_control_block_init (INITIAL_USER_PROCESS_TID);
 }
 
-void
+/* Deletes the reference to a given PCB from the PCB hash map and
+   free the memory allocated to the given PCB. */
+static void
 free_pcb (struct process_control_block *pcb)
 {
   hash_delete (&blocks, &pcb->blocks_elem);
-
   free (pcb);
 }
 
 /* Called when the main thread is about to exit. Frees and deletes the process
-   control block made above from the hash map (as it has no parent to free it) 
+   control block made in init_process from the hash map (as it has no parent to free it) 
    and also destroys the process control blocks hash map. */
 void
 destroy_initial_process (void)
@@ -62,22 +61,31 @@ destroy_initial_process (void)
   free (block);
 }
 
-/* Creates and inserts a process control block. We set the return status is -1
-   since we assume that if a process does not call exit, then it has not executed
-   correctly. */
+/* Creates and inserts a process control block into the PCB hash map. */
 static bool
 process_control_block_init (tid_t tid)
 {
+
+  /* This is freed either by a process or it's parent's process in process_exit. As
+     a special case, the main thread will free the PCB for the first user process created
+     in destroy_initial_process. */
   struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
   if (block == NULL)
     return false;
 
   block->tid = tid;
   block->parent_tid = thread_current ()->tid;
+
+  /* Assume that if a process does not update this in a call to exit() 
+     then the process has not executed correctly - so we set the initial
+     status to -1. */
   block->status = -1;
+
   block->has_exited = false;
   block->was_waited_on = false;
+
   block->next_fd = 2;
+
   sema_init (&block->wait_sema, 0);
   sema_init (&block->load_sema, 0);
   list_init (&block->children);
@@ -85,8 +93,8 @@ process_control_block_init (tid_t tid)
 
   hash_insert (&blocks, &block->blocks_elem);
 
+  /* If we have a parent, then we add our block to the parent's list of children. */
   struct process_control_block *parent_block = get_pcb_by_tid (thread_current ()->tid);
-
   if (parent_block != NULL)
     list_push_back (&parent_block->children, &block->child_elem);
 
@@ -120,7 +128,6 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-  
   
   char *token, *save_ptr;
   int last = 0;
@@ -173,15 +180,18 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (args[0], &if_.eip, &if_.esp);
 
+  /* We can let any parent process that has made a call to exec know that 
+     they can now return, and we tell them if we managed to successfully load
+     their child process or not. */
   struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
   pcb->has_loaded = success;
   sema_up (&pcb->load_sema);
 
-  /* If load failed, quit. */
+  /* If load failed, quit. Make sure to free the memory allocated to
+     the arguments. */
   if (!success) {
-    for (int argc = 0; args[argc] != NULL; argc++) {
+    for (int argc = 0; args[argc] != NULL; argc++)
       free (args[argc]);
-    }
     palloc_free_page (args);
     thread_exit ();
   }
@@ -195,7 +205,7 @@ start_process (void *file_name_)
 
   /* First, push the arg strings onto the stack and free the memory
      allocated to them. */
-     // TODO: what if we reach end of page
+  // TODO: what if we reach end of page
   int argc = 0;
   for (argc = 0; args[argc] != NULL; argc++) {
     last_arg_start -= (strlen(args[argc]) + 1);
@@ -243,21 +253,26 @@ start_process (void *file_name_)
 }
 
 /* Waits for thread TID to die and returns its exit status. 
- * If it was terminated by the kernel (i.e. killed due to an exception), 
- * returns -1.  
- * If TID is invalid or if it was not a child of the calling process, or if 
- * process_wait() has already been successfully called for the given TID, 
- * returns -1 immediately, without waiting.
- * 
- * This function will be implemented in task 2.
- * For now, it does nothing. */
+   If it was terminated by the kernel (i.e. killed due to an exception), 
+   returns -1.  
+
+   If TID is invalid or if it was not a child of the calling process, or if 
+   process_wait() has already been successfully called for the given TID, 
+   returns -1 immediately, without waiting.
+   
+   This function will be implemented in task 2.
+   For now, it does nothing. */
 int
 process_wait (tid_t child_tid) 
 {
   struct process_control_block *child_pcb = get_pcb_by_tid (child_tid);
 
+  /* If the tid does not correspond to a PCB or if we have already waited on
+     it, then return -1. */
   if (child_pcb == NULL || child_pcb->was_waited_on)
     return -1;
+
+  /* If the tid does not correspond to a child of the current thread, return -1.*/
 
   sema_down (&child_pcb->wait_sema);
   child_pcb->was_waited_on = true;
@@ -272,56 +287,41 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  /* Gets our own PCB. */
   struct process_control_block *pcb = get_pcb_by_tid (cur->tid);
 
+  /* Allow any parent process waiting on our process to continue. */
   sema_up (&pcb->wait_sema);
+
+  /* Close all files open by the current process and remove all
+     files from our PCB's file list. Also handles re-allowing writes
+     to our executable. */
+  pcb_remove_all_files (pcb);
+
+  enum intr_level old_level = intr_disable ();
 
   struct list_elem *e;
 
-  // TODO: THINK ABOUT SYNCHRONIZATION
-  
-  enum intr_level old_level = intr_disable ();
-  
-  // I want to die and for all my children (my child has died, then it is my responsiblity to free my dead child)
-
-  pcb_remove_all_files (pcb);
-
+  /* Iterates through our children and frees their PCB's if they have already exited. */
   for (e = list_begin (&pcb->children); e != list_end (&pcb->children); ) {
-
     struct process_control_block *child_pcb = list_entry (e, struct process_control_block, child_elem);
+
+    /* Before we free our child's PCB, get a reference to the next child in the list. */
     e = list_next (e);
 
+    /* Free our child's PCB if it has exited. */
     if (child_pcb->has_exited)
       free_pcb (child_pcb);
   }
 
+  /* If we were still alive whilst our parent process was exiting, our PCB won't have 
+     been freed. Therefore, it is our responsibility to free our own PCB. */
   struct process_control_block *parent_pcb = get_pcb_by_tid (pcb->parent_tid);
-
-  // If my parent has died and I want to die, then it is my responsiblity to free myself 
   if (parent_pcb == NULL || parent_pcb->has_exited)
     free_pcb (pcb);
 
-
-  
-
-  /*
-
-  A -> B -> C
-
-  A B C (B, C)
-  A C B (C, B)
-  B A C
-  B C A
-  C A B
-  C B A
-
-  A wants to die, B has died, free B
-  A has died, B wants to die, free B
-
-  My parent wants to die and I have died, then it is the parent responsiblity to free me
-  If my parent has died and I want to die, then it is my responsiblity to free myself
-
-  */
+  /* Mark our process as having exited, so our parent and children know (needed when they exit to ensure
+     all PCBs are freed).*/
   pcb->has_exited = true;
 
   intr_set_level (old_level);
@@ -458,6 +458,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
+  /* We deny write to our own executable for the duration of our process' lifespan.*/
   file_deny_write (file);
 
   /* Read and verify executable header. */
@@ -539,6 +540,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
+  /* We add our own executable file to our PCB's files list, so that 
+     we re-allow writing to it once we exit. */
   pcb_add_file (get_pcb_by_tid (thread_current ()->tid), file);
   success = true;
 

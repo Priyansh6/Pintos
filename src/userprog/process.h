@@ -18,8 +18,8 @@ struct process_control_block {
   int status;                     /* Stores the exit status of this process. */
   bool was_waited_on;             /* Processes can't be waited on more than once. */
 
-  bool has_loaded;                // TODO: think about how we can get rid of this
-  bool has_exited;                // TODO: COMBINE WITH was_waited_on
+  bool has_loaded;                /* Marks whether or not the process has successfully loaded. */
+  bool has_exited;                /* Marks whether or not the process has exited. */
   
   struct semaphore wait_sema;     /* Semaphore to synchronise parent and child process. */
   struct semaphore load_sema;

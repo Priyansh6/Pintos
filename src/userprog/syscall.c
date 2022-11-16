@@ -48,7 +48,8 @@ static uint32_t close_handler (void *args[]);
 
 static struct lock fs_lock;
 
-/* Map from system call number to the corresponding handler */
+/* Map from system call number to the corresponding handler. We also
+   provide the expected argument count (used to validate arguments later on). */
 static const struct syscall syscall_ptrs[] = {
   {.handler = &halt_handler, .argc = 0},
   {.handler = &exit_handler, .argc = 1},
@@ -99,8 +100,9 @@ syscall_handler (struct intr_frame *f)
   }
 }
 
-/* If the user provides an invalid system call number, we handle 
-   it gracefully by terminating the user thread. */
+/* Gracefully exits the user program with status -1. Should be called
+   in the event of an error (e.g user attempts to pass a NULL argument to 
+   system call or attempts to derefence a NULL pointer themselves.) */
 void
 exit_failure (void)
 {
@@ -109,6 +111,11 @@ exit_failure (void)
   exit_handler (args);
 }
 
+/* Populates the args array with the arguments passed to the syscall
+   which are stored on the stack. We don't (at this point) know the type
+   of each argument but we do know that each argument is a pointer. Since
+   all pointers are of the same size, we can traverse up the stack by the size
+   of a pointer to get each argument. */
 static void
 get_args (void *esp, void *args[], int num_args)
 {
@@ -145,83 +152,6 @@ free_hash_elem(struct hash_elem *e, void *aux UNUSED)
   free(pcb);
 }
 
-static uint32_t
-halt_handler (void *args[] UNUSED)
-{
-  //free all entries in blocks hash table and the table itself
-  hash_destroy(&blocks, free_hash_elem);
-
-  //shutdown pintos
-  shutdown_power_off();
-  destroy_initial_process ();
-  thread_exit ();
-  //should never get here
-  return 0;
-}
-
-static uint32_t
-exit_handler (void *args[]) 
-{
-  int *status_code = args[0];
-
-  get_pcb_by_tid (thread_current ()->tid)->status = *status_code;
-
-  printf ("%s: exit(%d)\n", thread_current()->name, *status_code);
-  thread_exit ();
-  return 0;
-}
-
-static uint32_t
-exec_handler(void *args[]) 
-{
-  const char **cmd = args[0];
-  if (!VALIDATE_USER_POINTER (char *, *cmd))
-    exit_failure ();
-
-  tid_t tid = process_execute (*cmd);
-  struct process_control_block *pcb = get_pcb_by_tid (tid);
-  sema_down (&pcb->load_sema);
-  return pcb->has_loaded ? tid : -1;
-}
-
-static uint32_t
-wait_handler (void *args[]) 
-{
-  tid_t *tid = args[0];
-  return process_wait (*tid);
-}
-
-//creates a new file on the filesys
-//NOT TESTED
-static uint32_t 
-create_handler (void *args[])
-{
-  const char **file = args[0];
-  if (!VALIDATE_USER_POINTER (char *, *file))
-    exit_failure ();
-
-  off_t *initial_size = args[1];
-
-  lock_acquire(&fs_lock);
-  bool success = filesys_create(*file, *initial_size);
-  lock_release(&fs_lock);
-  return success;
-
-}
-
-static uint32_t 
-remove_handler (void *args[])
-{
-  const char **file = args[0];
-  if (!VALIDATE_USER_POINTER (char *, *file))
-    exit_failure ();
-
-  lock_acquire (&fs_lock);
-  bool result = filesys_remove (*file);
-  lock_release (&fs_lock);
-  return result;
-}
-
 /* Gets file with file decriptor fd from the current running process's process
    control block. Calls exit_failure if a file was not found. */
 static struct file *
@@ -255,9 +185,104 @@ assert_valid_fd (int fd) {
   assert_fd_greater_than (fd, -1);
 }
 
+/* Immediately shutsdown PintOS. */
+static uint32_t
+halt_handler (void *args[] UNUSED)
+{
+  //free all entries in blocks hash table and the table itself
+  hash_destroy(&blocks, free_hash_elem);
+
+  //shutdown pintos
+  shutdown_power_off();
+  destroy_initial_process ();
+  thread_exit ();
+  //should never get here
+  return 0;
+}
+
+/* Sets the return status of the current process' PCB to
+   the status code passed by the user and exits the currently
+   running process. */
+static uint32_t
+exit_handler (void *args[]) 
+{
+  int *status_code = args[0];
+
+  get_pcb_by_tid (thread_current ()->tid)->status = *status_code;
+
+  printf ("%s: exit(%d)\n", thread_current()->name, *status_code);
+  thread_exit ();
+  return 0;
+}
+
+/* Creates a new process which runs the executable given by
+   the user (filename). 
+   
+   We must not return from this until we are sure that the executable
+   has fully and successfully loaded. This is handled by the load_sema
+   on the process' PCB. */
+static uint32_t
+exec_handler(void *args[]) 
+{
+
+  /* Verify that we can dereference the filename string. */
+  const char **filename = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *filename))
+    exit_failure ();
+
+  tid_t tid = process_execute (*filename);
+  struct process_control_block *pcb = get_pcb_by_tid (tid);
+  sema_down (&pcb->load_sema);
+  return pcb->has_loaded ? tid : -1;
+}
+
+/* Makes the currently running process wait for one of
+   it's child processes to finish executing. */
+static uint32_t
+wait_handler (void *args[]) 
+{
+  tid_t *tid = args[0];
+  return process_wait (*tid);
+}
+
+/* Creates a file on the PintOS file system. */
+static uint32_t 
+create_handler (void *args[])
+{
+  /* Verify that we can dereference the file string. */
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+
+  off_t *initial_size = args[1];
+
+  lock_acquire(&fs_lock);
+  bool success = filesys_create(*file, *initial_size);
+  lock_release(&fs_lock);
+  return success;
+
+}
+
+/* Removes a file from the PintOS file system. */
+static uint32_t 
+remove_handler (void *args[])
+{
+  /* Verify that we can dereference the file string. */
+  const char **file = args[0];
+  if (!VALIDATE_USER_POINTER (char *, *file))
+    exit_failure ();
+
+  lock_acquire (&fs_lock);
+  bool result = filesys_remove (*file);
+  lock_release (&fs_lock);
+  return result;
+}
+
+/* Opens a file. */
 static uint32_t 
 open_handler (void *args[])
 {
+  /* Verify that we can dereference the file string. */
   const char **file = args[0];
   if (!VALIDATE_USER_POINTER (char *, *file))
     exit_failure ();
@@ -278,6 +303,7 @@ open_handler (void *args[])
   return fd;
 }
 
+/* Returns the filesize, in bytes, of a given file. */
 static uint32_t 
 filesize_handler (void *args[])
 {
@@ -291,6 +317,11 @@ filesize_handler (void *args[])
   return length;
 }
 
+/* Reads size bytes from the file open as fd into buffer. 
+
+   Returns the number of bytes actually
+   read (0 at end of file), or -1 if the file could not be read (due to a condition other than
+   end of file). */
 static uint32_t 
 read_handler (void *args[])
 {
@@ -299,19 +330,22 @@ read_handler (void *args[])
   uint32_t *size = args[2];
   assert_valid_fd (*fd);
 
+  /* Verify that we can dereference the buffer. */
   if (!VALIDATE_USER_POINTER (char *, *buffer))
     exit_failure ();
 
   switch (*fd) {
     case 0:
-      for (uint32_t i = 0; i < *size; i++) {
+      /* Read from user input device (i.e keyboard). */
+      for (uint32_t i = 0; i < *size; i++)
         *buffer[i] = input_getc ();
-      }
       return *size;
     case 1:
+      /* Reserved for writing to STDOUT. */
       exit_failure ();
       return 0;
     default:
+      /* Read from a file on the file system into the buffer.*/
       lock_acquire (&fs_lock);
       uint32_t bytes_read = file_read (get_file(*fd), *buffer, *size);
       lock_release (&fs_lock);
@@ -319,6 +353,8 @@ read_handler (void *args[])
   }
 }
 
+/* Writes size bytes from buffer to the open file fd. Returns the number of bytes actually
+   written, which may be less than size if some bytes could not be written. */
 static uint32_t
 write_handler (void *args[])
 {
@@ -327,19 +363,22 @@ write_handler (void *args[])
   uint32_t *size = args[2];
   assert_valid_fd (*fd);
 
+  /* Verify that we can dereference the buffer. */
   if (!VALIDATE_USER_POINTER (char *, *buffer))
     exit_failure ();
 
   switch (*fd) {
     case 0:
+      /* Reserved for reading from STDIN. */
       exit_failure ();
       return 0;
     case 1:
-      for (uint32_t i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT) {
+      /* Write the contents of the buffer to STDOUT. */
+      for (uint32_t i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT)
         putbuf (*(buffer) + i, MIN(MAX_CONSOLE_BUFFER_OUTPUT, *size - i));
-      }
       return *size;
     default:
+      /* Write the contents of the buffer to a file. */
       lock_acquire (&fs_lock);
       uint32_t bytes_written = file_write (get_file(*fd), *buffer, *size);
       lock_release (&fs_lock);
@@ -347,6 +386,8 @@ write_handler (void *args[])
   }
 }
 
+/* Changes the next byte to be read or written in open file fd to position, expressed in bytes
+   from the beginning of the file. */
 static uint32_t 
 seek_handler (void *args[])
 {
@@ -360,6 +401,8 @@ seek_handler (void *args[])
   return 0;
 }
 
+/* Returns the position of the next byte to be read or written in open file fd, expressed in bytes
+   from the beginning of the file.*/
 static uint32_t 
 tell_handler (void *args[]) 
 {
@@ -371,9 +414,10 @@ tell_handler (void *args[])
   return position;
 }
 
+/* Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file
+   descriptors, as if by calling this function for each one. */
 static uint32_t 
 close_handler (void *args[])
-// TODO: CLOSE ALL FILES ASSOCIATED WITH PROCESS WHEN IT EXITS
 {
   int *fd = args[0];
   assert_fd_greater_than (*fd, 1);
