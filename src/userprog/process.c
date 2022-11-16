@@ -149,15 +149,12 @@ process_execute (const char *file_name)
   if (args == NULL)
     return TID_ERROR;
 
-  for (int i = 0; i < MAX_BYTES_PER_PAGE; i++) {
-    *(args + i) = '\0';
-  }
+  /* Initialise the page to sentinel characters. */
+  memset (args, '\0', MAX_BYTES_PER_PAGE);
 
   /* Make a copy of FILE_NAME, because we musn't modify file_name. */
-  char *fn_copy = (char *) malloc ((1 + strlen (file_name)) * sizeof (char));
-  if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  char fn_copy[(1 + strlen (file_name)) * sizeof (char)];
+  strlcpy (fn_copy, file_name, (1 + strlen (file_name)) * sizeof (char));
   
   char *token, *save_ptr;
   int last = 0;
@@ -168,8 +165,6 @@ process_execute (const char *file_name)
     strlcpy ((args + characters_written), token, sizeof (char) * (strlen (token) + 1));
     characters_written += sizeof (char) * (strlen (token) + 1);
   }
-
-  free (fn_copy);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (args, PRI_DEFAULT, start_process, args);
@@ -231,7 +226,7 @@ start_process (void *file_name_)
   uint32_t bytes_written = 0;
 
   for (int i = 0; i < MAX_BYTES_PER_PAGE; ) {
-    if (*(args + i) == NULL && *(args + i + 1) == NULL) {
+    if (*(args + i) == '\0' && *(args + i + 1) == '\0') {
       break;
     } else {
       uint32_t size = strlen(args + i) + 1;
