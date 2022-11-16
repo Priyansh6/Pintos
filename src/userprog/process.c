@@ -17,9 +17,11 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/syscall.h"
 
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
 #define PUSH_STACK(type, pointer, value) pointer = ((type*) pointer) - 1; (*((type*) pointer) = (type) (value))
+#define MAX_BYTES_PER_PAGE 4096
 
 #define INITIAL_USER_PROCESS_TID 3
 
@@ -29,6 +31,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static bool process_control_block_init (tid_t tid);
 static void process_file_close (struct process_file *pfile);
 static void free_pcb (struct process_control_block *pcb);
+static bool is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write);
 
 /* Called in init.c when Pintos first starts up (and is running a user program).
    Initialises the PCB hash map and creates a PCB for the first user process thread
@@ -106,6 +109,15 @@ process_file_close (struct process_file *pfile) {
   list_remove (&pfile->list_elem);
   file_close (pfile->file);
   free (pfile);
+}
+
+/* Calculate how many bytes would be pushed to the stack for the current
+   argument and terminate the process if this would cause a stack overflow. */
+static bool
+is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write)
+{
+  *bytes_written += bytes_to_write;
+  return *bytes_written > MAX_BYTES_PER_PAGE;
 }
 
 /* Starts a new thread running a user program loaded from
@@ -203,21 +215,56 @@ start_process (void *file_name_)
   char *esp_start = if_.esp;
   char *last_arg_start = if_.esp;
 
+  uint32_t bytes_written = 0;
+
   /* First, push the arg strings onto the stack and free the memory
      allocated to them. */
-  // TODO: what if we reach end of page
-  int argc = 0;
+  uint32_t argc = 0;
   for (argc = 0; args[argc] != NULL; argc++) {
-    last_arg_start -= (strlen(args[argc]) + 1);
-    strlcpy (last_arg_start, args[argc], strlen(args[argc]) + 1);
+
+    uint32_t size = strlen(args[argc]) + 1;
+
+    /* Check that we can push argument to the stack without causing overflow. */
+    if (is_stack_overflow (&bytes_written, size * sizeof (char *)))
+      exit_failure ();
+
+    /* If the entire page is full (and therefore for loop will never terminate)
+       break out of the argument pushing loop. */
+    if (argc > MAX_BYTES_PER_PAGE / sizeof (void *))
+      break;
+
+    /* Push string to stack. */
+    last_arg_start -= size;
+    strlcpy (last_arg_start, args[argc], size);
     free (args[argc]);
   }
 
   /* Free the page allocated for the arguments. */
   palloc_free_page (args);
 
-  /* Word align the stack. */
+  /* Calculate number of bytes needed to word align the stack. */
   int word_align = (esp_start - last_arg_start) % 4;
+  
+  /* We are about to push: 
+     (i) a char for the number of word align bytes 
+     (ii) a char* for the sentinel character 
+     (iii) a char* for each argument (argc lots of char*)
+     (iv) a char** for argv 
+     (v) two ints representing argc and the fake return address respectively
+          so we check to see if these will also fit on the stack. */
+  size_t remaining_setup_bytes = sizeof (char) * word_align + 
+                                 sizeof (char *) + 
+                                 sizeof (char *) * argc + 
+                                 sizeof (char **) + 
+                                 sizeof (int) + 
+                                 sizeof (int);
+
+  /* If pushing the remaining bytes to the stack will cause a stack overflow,
+     gracefully exit the user process. */
+  if (is_stack_overflow (&bytes_written, remaining_setup_bytes))
+    exit_failure ();
+
+  /* Word align the stack. */
   if_.esp = last_arg_start - word_align;
   memset (if_.esp, 0, word_align);
 
@@ -237,7 +284,7 @@ start_process (void *file_name_)
     }
   }
 
-  /* Push argv, argc and return addres to the stack. */
+  /* Push argv, argc and return address to the stack. */
   PUSH_STACK (char **, if_.esp, ((char **) if_.esp) + 1);
   PUSH_STACK (int, if_.esp, argc);
   PUSH_STACK (int, if_.esp, 0);
