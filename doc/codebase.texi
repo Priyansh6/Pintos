@@ -617,7 +617,6 @@ Our Task 0 code-review will cover @strong{four} main areas:
 functional correctness, efficiency, design quality and general coding style.
 
 @itemize @bullet
-
 @item For @strong{functional correctness}, we will be looking to see if your solution can handle many 
 threads going to sleep or waking-up at the same time, without any unnecessary delays. 
 We will also be checking if your code for @func{timer_sleep} and @func{timer_interrupt} is free of any race conditions.
@@ -630,7 +629,7 @@ how long they must sleep for. We will also be looking at your use of memory.
 the rest of the provided operating system. We want to see clear module boundaries and use of abstraction.
 
 @item For @strong{general coding style}, we will be paying attention to all of the usual elements of good style 
-that you should be used to from last year (e.g. code layout, appropriate use of comments, avoiding magic numbers, etc.)
+that you should be used to from last year (e.g. consistent code layout, appropriate use of comments, avoiding magic numbers, etc.)
 as well as your use of git (e.g. commit frequency and commit message quality).
 @end itemize
 @end table

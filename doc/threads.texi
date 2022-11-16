@@ -335,9 +335,23 @@ kernel thread but the first.
 @item What should I expect from the Task 1 code-review?
 
 The code-review for this task will be conducted with each group in-person.
+Our Task 1 code-review will cover @strong{four} main areas: 
+functional correctness, efficiency, design quality and general coding style.
 
-More details coming soon...
+@itemize @bullet
+@item For @strong{functional correctness}, we will be looking to see if your implementation of priority scheduling strictly obeys the rule that "the highest priority ready thread will always be running" and that all cases of priority inversion are being correctly handled by your system for priority donations.
+We will also be checking if your updated code for locks is free of any race conditions, paying specific attention to the @func{lock_acquire} and @func{lock_release} functions, as well as the interplay between them.
 
+@item For @strong{efficiency}, we will be looking at the complexity characteristics of your modified code for semaphores, as well 
+the steps you have taken to minimise the time spent inside your timer interrupt handler.
+
+@item For @strong{design quality}, we will be looking at the stability and robustness of any changes you have made to the core Pintos kernel (e.g. @func{thread_block}, @func{thread_unblock} and @func{thread_yield}) and the accuracy of the priority updates in your BSD scheduler.
+
+@item For @strong{general coding style}, we will be paying attention to all of the usual elements of good style 
+that you should be used to from last year (e.g. consistent code layout, appropriate use of comments, avoiding magic numbers, etc.)
+as well as your use of git (e.g. commit frequency and commit message quality).
+In this task, we will be paying particular attention to the readability of your fixed-point mathematics abstraction within your BSD scheduler.
+@end itemize
 @end table
 
 @menu
