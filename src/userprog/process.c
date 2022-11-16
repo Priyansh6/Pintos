@@ -141,13 +141,17 @@ is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write)
 tid_t
 process_execute (const char *file_name) 
 {
-  char **args;
+  char *args;
   tid_t tid;
 
   /* Allocate a page of virtual memory for the arguments (so the total size of arguments are limited to 4KB). */
   args = palloc_get_page (0);
   if (args == NULL)
     return TID_ERROR;
+
+  for (int i = 0; i < MAX_BYTES_PER_PAGE; i++) {
+    *(args + i) = '\0';
+  }
 
   /* Make a copy of FILE_NAME, because we musn't modify file_name. */
   char *fn_copy = (char *) malloc ((1 + strlen (file_name)) * sizeof (char));
@@ -157,25 +161,18 @@ process_execute (const char *file_name)
   
   char *token, *save_ptr;
   int last = 0;
-  
+  int characters_written = 0;
+
   /* Populate args array with each word in the command being run (file_name). */
   for (token = strtok_r (fn_copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr), last++) {
-    args[last] = (char *) malloc (sizeof (char) * (strlen (token) + 1));
-    if (args[last] == NULL)
-      return TID_ERROR;
-    memcpy (args[last], token, strlen(token) + 1);
+    strlcpy ((args + characters_written), token, sizeof (char) * (strlen (token) + 1));
+    characters_written += sizeof (char) * (strlen (token) + 1);
   }
 
-  args[last] = NULL;
-  
   free (fn_copy);
 
-  /* If last is 0 it means there were no tokens to process and so we should return an error state. */
-  if (last == 0)
-    return TID_ERROR;
-
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (args[0], PRI_DEFAULT, start_process, args);
+  tid = thread_create (args, PRI_DEFAULT, start_process, args);
 
   /* If the process is not the initial user process, then we create a process
      control block for it. We have already made a process control block for the
@@ -194,7 +191,7 @@ process_execute (const char *file_name)
 static void
 start_process (void *file_name_)
 {
-  char **args = file_name_;
+  char *args = file_name_;
 
   struct intr_frame if_;
   bool success;
@@ -204,7 +201,10 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (args[0], &if_.eip, &if_.esp);
+
+  
+
+  success = load (args, &if_.eip, &if_.esp);
 
   /* We can let any parent process that has made a call to exec know that 
      they can now return, and we tell them if we managed to successfully load
@@ -216,8 +216,6 @@ start_process (void *file_name_)
   /* If load failed, quit. Make sure to free the memory allocated to
      the arguments. */
   if (!success) {
-    for (int argc = 0; args[argc] != NULL; argc++)
-      free (args[argc]);
     palloc_free_page (args);
     thread_exit ();
   }
@@ -229,29 +227,48 @@ start_process (void *file_name_)
   char *esp_start = if_.esp;
   char *last_arg_start = if_.esp;
 
+  uint32_t argc = 0;
   uint32_t bytes_written = 0;
 
+  for (int i = 0; i < MAX_BYTES_PER_PAGE; ) {
+    if (*(args + i) == NULL && *(args + i + 1) == NULL) {
+      break;
+    } else {
+      uint32_t size = strlen(args + i) + 1;
+      if (is_stack_overflow (&bytes_written, size * sizeof (char)))
+        exit_failure ();
+
+      /* Push string to stack. */
+      last_arg_start -= size;
+      strlcpy (last_arg_start, args + i, size);
+      i += size;
+      argc++;
+    }
+  }
   /* First, push the arg strings onto the stack and free the memory
      allocated to them. */
-  uint32_t argc = 0;
-  for (argc = 0; args[argc] != NULL; argc++) {
+  
 
-    uint32_t size = strlen(args[argc]) + 1;
+  
+  // for (argc = 0; args[argc] != NULL; argc++) {
 
-    /* Check that we can push argument to the stack without causing overflow. */
-    if (is_stack_overflow (&bytes_written, size * sizeof (char *)))
-      exit_failure ();
+  //   uint32_t size = strlen(args[argc]) + 1;
 
-    /* If the entire page is full (and therefore for loop will never terminate)
-       break out of the argument pushing loop. */
-    if (argc > MAX_BYTES_PER_PAGE / sizeof (void *))
-      break;
+  //   /* Check that we can push argument to the stack without causing overflow. */
+  //   if (is_stack_overflow (&bytes_written, size * sizeof (char *)))
+  //     exit_failure ();
 
-    /* Push string to stack. */
-    last_arg_start -= size;
-    strlcpy (last_arg_start, args[argc], size);
-    free (args[argc]);
-  }
+  //   /* If the entire page is full (and therefore for loop will never terminate)
+  //      break out of the argument pushing loop. */
+  //   if (argc > MAX_BYTES_PER_PAGE / sizeof (void *))
+  //     break;
+
+  //   /* Push string to stack. */
+  //   last_arg_start -= size;
+  //   strlcpy (last_arg_start, args[argc], size);
+  //   free (args[argc]);
+  // }
+  
 
   /* Free the page allocated for the arguments. */
   palloc_free_page (args);
