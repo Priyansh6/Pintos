@@ -56,6 +56,7 @@ static void
 free_pcb (struct process_control_block *pcb)
 {
   hash_delete (&blocks, &pcb->blocks_elem);
+  hash_destroy (&pcb->files, NULL);
   free (pcb);
 }
 
@@ -66,9 +67,8 @@ void
 destroy_initial_process (void)
 {
   struct process_control_block *block = get_pcb_by_tid (INITIAL_USER_PROCESS_TID);
-  hash_delete (&blocks, &block->blocks_elem);
+  free_pcb (block);
   hash_destroy (&blocks, NULL);
-  free (block);
 }
 
 /* Creates and inserts a process control block into the PCB hash map. */
