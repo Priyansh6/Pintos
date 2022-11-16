@@ -1,6 +1,8 @@
 #include "userprog/process.h"
 #include <debug.h>
+#include <hash.h>
 #include <inttypes.h>
+#include <list.h>
 #include <round.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +17,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
@@ -25,50 +28,83 @@
 
 #define INITIAL_USER_PROCESS_TID 3
 
+struct process_control_block;
+struct process_file;
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 static bool process_control_block_init (tid_t tid);
-static void process_file_close (struct process_file *pfile);
+static struct process_control_block *get_pcb_by_tid (tid_t tid);
+static struct process_control_block *process_get_pcb (void);
 static void free_pcb (struct process_control_block *pcb);
-static bool is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write);
+static void pcb_hash_free(struct hash_elem *e, void *aux UNUSED);
+
+static void process_file_close (struct process_control_block *pcb, struct process_file *pfile);
+static void process_file_hash_close (struct hash_elem *e, void *aux UNUSED);
 
 static bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 static unsigned block_hash (const struct hash_elem *elem, void *aux UNUSED);
 
 static bool fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 static unsigned process_file_hash (const struct hash_elem *elem, void *aux UNUSED);
-static void process_file_hash_close (struct hash_elem *e, void *aux UNUSED);
 
-/* Called in init.c when Pintos first starts up (and is running a user program).
-   Initialises the PCB hash map and creates a PCB for the first user process thread
-   (i.e first thread which is not MAIN or IDLE). */
-void
-init_process () 
-{
-  hash_init (&blocks, &block_hash, &tid_less, NULL);
-  process_control_block_init (INITIAL_USER_PROCESS_TID);
-}
+static bool is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write);
 
-/* Deletes the reference to a given PCB from the PCB hash map and
-   free the memory allocated to the given PCB. */
-static void
-free_pcb (struct process_control_block *pcb)
-{
-  hash_delete (&blocks, &pcb->blocks_elem);
-  hash_destroy (&pcb->files, NULL);
-  free (pcb);
-}
+/* Each process has its own process control block responsible
+   for keeping track of any children it could wait on and storing
+   the return status of these children. It also keeps track of the file
+   descriptors associated with the process. */
+struct process_control_block {
+  tid_t tid;                      /* tid of process. */
+  tid_t parent_tid;               /* tid of parent process */
+
+  int status;                     /* Stores the exit status of this process. */
+  bool was_waited_on;             /* Processes can't be waited on more than once. */
+
+  bool has_loaded;                /* Marks whether or not the process has successfully loaded. */
+  bool has_exited;                /* Marks whether or not the process has exited. */
+  
+  struct semaphore wait_sema;     /* Semaphore to synchronise parent and child process. */
+  struct semaphore load_sema;
+
+  struct hash_elem blocks_elem;   /* Enables process_control_block to be in struct hash. */
+
+  struct list children;           /* Each process_control_block contains a list of all its children. */
+  struct list_elem child_elem;    /* Required to embed process_control_blocks in a struct list. */
+
+  int next_fd;                    /* Contains the next possible file descriptor for this process */
+  struct hash files;              /* Map from file descriptors to struct process_file */
+};
+
+/* This struct is used to store pointers to files associated with processes
+   as well as the corresponding file descriptors. */
+struct process_file {
+  int fd;                         /* Stores the file descriptor for this file in a process. */
+  struct file *file;              /* Stores pointer to associated file */
+
+  struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
+};
+
+/* Map from pid_t to struct process_control_block */
+static struct hash blocks;
 
 /* Called when the main thread is about to exit. Frees and deletes the process
    control block made in init_process from the hash map (as it has no parent to free it) 
    and also destroys the process control blocks hash map. */
 void
-destroy_initial_process (void)
+destroy_blocks (void) {
+  hash_destroy(&blocks, pcb_hash_free);
+}
+
+/* Called in init.c when Pintos first starts up (and is running a user program).
+   Initialises the PCB hash map and creates a PCB for the first user process thread
+   (i.e first thread which is not MAIN or IDLE). */
+void
+init_process (void) 
 {
-  struct process_control_block *block = get_pcb_by_tid (INITIAL_USER_PROCESS_TID);
-  free_pcb (block);
-  hash_destroy (&blocks, NULL);
+  hash_init (&blocks, &block_hash, &tid_less, NULL);
+  process_control_block_init (INITIAL_USER_PROCESS_TID);
 }
 
 /* Creates and inserts a process control block into the PCB hash map. */
@@ -78,7 +114,7 @@ process_control_block_init (tid_t tid)
 
   /* This is freed either by a process or it's parent's process in process_exit. As
      a special case, the main thread will free the PCB for the first user process created
-     in destroy_initial_process. */
+     in destroy_blocks. */
   struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
   if (block == NULL)
     return false;
@@ -104,25 +140,69 @@ process_control_block_init (tid_t tid)
   hash_insert (&blocks, &block->blocks_elem);
 
   /* If we have a parent, then we add our block to the parent's list of children. */
-  struct process_control_block *parent_block = get_pcb_by_tid (thread_current ()->tid);
+  struct process_control_block *parent_block = process_get_pcb ();
   if (parent_block != NULL)
     list_push_back (&parent_block->children, &block->child_elem);
 
   return true;
 }
 
+/* Finds and returns a pointer to the process control block in the blocks hash map. */
+static struct process_control_block *
+get_pcb_by_tid (tid_t tid)
+{
+  struct process_control_block pcb;
+  struct hash_elem *e;
+
+  pcb.tid = tid;
+
+  e = hash_find (&blocks, &pcb.blocks_elem);
+
+  return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
+}
+
+/* Returns the current process's process control block. */
+static struct process_control_block *
+process_get_pcb (void)
+{
+  return get_pcb_by_tid (thread_current ()->tid);
+}
+
+/* Deletes the reference to a given PCB from the PCB hash map and
+   free the memory allocated to the given PCB. */
+static void
+free_pcb (struct process_control_block *pcb)
+{
+  hash_delete (&blocks, &pcb->blocks_elem);
+  hash_destroy (&pcb->files, NULL);
+  free (pcb);
+}
+
+/* Frees the process_control_block associated with hash_elem e. */
+static void
+pcb_hash_free(struct hash_elem *e, void *aux UNUSED)
+{
+  struct process_control_block *pcb = hash_entry (e, struct process_control_block, blocks_elem);
+  hash_destroy (&pcb->files, NULL);
+  free(pcb);
+}
+
 /* Closes and frees file pointed to by process_file pfile */
 static void
-process_file_close (struct process_file *pfile) {
+process_file_close (struct process_control_block *pcb, struct process_file *pfile)
+{
+  hash_delete (&pcb->files, &pfile->hash_elem);
   file_close (pfile->file);
   free (pfile);
 }
 
 /* Executes process_file_close on process_file associated with hash_elem e */
 static void
-process_file_hash_close (struct hash_elem *e, void *aux UNUSED) {
+process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
+{
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
-  process_file_close (pfile);
+  file_close (pfile->file);
+  free (pfile);
 }
 
 /* Calculate how many bytes would be pushed to the stack for the current
@@ -132,6 +212,14 @@ is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write)
 {
   *bytes_written += bytes_to_write;
   return *bytes_written > MAX_BYTES_PER_PAGE;
+}
+
+/* Sets the current process's status code to the provided one. */
+void
+process_set_status_code (int status_code)
+{
+  struct process_control_block *pcb = process_get_pcb ();
+  pcb->status = status_code;
 }
 
 /* Starts a new thread running a user program loaded from
@@ -209,7 +297,7 @@ start_process (void *file_name_)
   /* We can let any parent process that has made a call to exec know that 
      they can now return, and we tell them if we managed to successfully load
      their child process or not. */
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  struct process_control_block *pcb = process_get_pcb ();
   pcb->has_loaded = success;
   sema_up (&pcb->load_sema);
 
@@ -313,16 +401,23 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
+/* Waits for the child with tid child_tid. Returns -1 if load failed otherwise
+   child_tid. */
+tid_t
+process_wait_on_load (tid_t child_tid)
+{
+  struct process_control_block *pcb = get_pcb_by_tid (child_tid);
+  sema_down (&pcb->load_sema);
+  return pcb->has_loaded ? child_tid : -1;
+}
+
 /* Waits for thread TID to die and returns its exit status. 
    If it was terminated by the kernel (i.e. killed due to an exception), 
    returns -1.  
 
    If TID is invalid or if it was not a child of the calling process, or if 
    process_wait() has already been successfully called for the given TID, 
-   returns -1 immediately, without waiting.
-   
-   This function will be implemented in task 2.
-   For now, it does nothing. */
+   returns -1 immediately, without waiting. */
 int
 process_wait (tid_t child_tid) 
 {
@@ -349,7 +444,7 @@ process_exit (void)
   uint32_t *pd;
 
   /* Gets our own PCB. */
-  struct process_control_block *pcb = get_pcb_by_tid (cur->tid);
+  struct process_control_block *pcb = process_get_pcb ();
 
   /* Allow any parent process waiting on our process to continue. */
   sema_up (&pcb->wait_sema);
@@ -773,30 +868,11 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-/* Finds and returns a pointer to the process control block in the blocks hash map. */
-struct process_control_block *
-get_pcb_by_tid (tid_t tid)
-{
-  struct process_control_block pcb;
-  struct hash_elem *e;
-
-  pcb.tid = tid;
-
-  e = hash_find (&blocks, &pcb.blocks_elem);
-
-  return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
-}
-
-/* Returns the current process's process control block. */
-static struct process_control_block *
-process_get_pcb (void) {
-  return get_pcb_by_tid (thread_current ()->tid);
-}
-
 /* Adds a file to current process's pcb as well as assigning it a file 
    descriptor, which it returns. Returns -1 if fails */
 int
-process_add_file (struct file* file) {
+process_add_file (struct file* file)
+{
   struct process_control_block *pcb = process_get_pcb ();
 
   struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
@@ -816,7 +892,8 @@ process_add_file (struct file* file) {
 /* Returns process_file struct associated with file descriptor fd in the current process's pcb or
    NULL if no file could be found. */
 static struct process_file *
-process_get_process_file (int fd) {
+process_get_process_file (int fd)
+{
   struct process_control_block *pcb = process_get_pcb ();
 
   struct process_file pfile;
@@ -838,20 +915,21 @@ process_get_file (int fd)
 /* Removes file with file descriptor fd from current process's pcb.
    Returns true if a file is removed. */
 bool
-process_remove_file (int fd) {
+process_remove_file (int fd)
+{
   struct process_file *pfile = process_get_process_file (fd);
   if (pfile == NULL) {
     return false;
   }
 
-  hash_delete (&process_get_pcb ()->files, &pfile->hash_elem);
-  process_file_close (pfile);
+  process_file_close (process_get_pcb (), pfile);
   return true;
 }
 
 /* Removes all files associated with current process's pcb. */
 void
-process_remove_all_files (void) {
+process_remove_all_files (void)
+{
   struct process_control_block *pcb = process_get_pcb ();
 
   hash_clear (&pcb->files, process_file_hash_close);
@@ -859,7 +937,8 @@ process_remove_all_files (void) {
 
 /* Compares process_control_blocks on the basis of their associated tid. */
 static bool 
-tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
+tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED)
+{
   const struct process_control_block *pcb_a = hash_entry (a, struct process_control_block, blocks_elem);
   const struct process_control_block *pcb_b = hash_entry (b, struct process_control_block, blocks_elem);
 
@@ -868,7 +947,8 @@ tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED
 
 /* Hashes the tid field of a process control block */
 static unsigned 
-block_hash (const struct hash_elem *elem, void *aux UNUSED) {
+block_hash (const struct hash_elem *elem, void *aux UNUSED)
+{
   const struct process_control_block *pcb = hash_entry (elem, struct process_control_block, blocks_elem);
 
   return hash_int (pcb->tid);
@@ -876,7 +956,8 @@ block_hash (const struct hash_elem *elem, void *aux UNUSED) {
 
 /* Compares process_files on the basis of their associated file descriptors. */
 static bool 
-fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
+fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED)
+{
   const struct process_file *pfile_a = hash_entry (a, struct process_file, hash_elem);
   const struct process_file *pfile_b = hash_entry (b, struct process_file, hash_elem);
 
@@ -885,7 +966,8 @@ fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED)
 
 /* Hashes the fd field of a process file */
 static unsigned 
-process_file_hash (const struct hash_elem *elem, void *aux UNUSED) {
+process_file_hash (const struct hash_elem *elem, void *aux UNUSED)
+{
   const struct process_file *pfile = hash_entry (elem, struct process_file, hash_elem);
 
   return hash_int (pfile->fd);

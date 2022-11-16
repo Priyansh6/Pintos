@@ -141,7 +141,7 @@ main (void)
 
   /* Finish up. */
   shutdown ();
-  destroy_initial_process ();
+  destroy_blocks ();
   thread_exit ();
 }
 
