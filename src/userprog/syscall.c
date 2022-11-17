@@ -209,7 +209,7 @@ exec_handler(void *args[])
   if (!VALIDATE_USER_POINTER (char *, *filename))
     exit_failure ();
 
-  tid_t tid = process_execute (*filename);
+  tid_t tid = process_execute (*filename);  
   struct process_control_block *pcb = get_pcb_by_tid (tid);
   sema_down (&pcb->load_sema);
   return pcb->has_loaded ? tid : -1;
