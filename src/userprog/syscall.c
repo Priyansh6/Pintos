@@ -186,10 +186,8 @@ exit_handler (void *args[])
 
   struct process_control_block *block = get_pcb_by_tid (thread_current ()->tid);
   
-  lock_acquire (&block->pcb_lock);
   block->status = *status_code;
   printf ("%s: exit(%d)\n", thread_current()->name, *status_code);
-  lock_release (&block->pcb_lock);
 
   thread_exit ();
   return 0;

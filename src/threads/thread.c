@@ -191,6 +191,12 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+  /* If the process is not the initial user process, then we create a process
+     control block for it. We have already made a process control block for the
+     initial user process, so we don't want to recreate it here. */
+  if (tid > 2)
+    process_control_block_init (tid);
+
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
