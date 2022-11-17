@@ -47,6 +47,7 @@ void
 init_process () 
 {
   hash_init (&blocks, &block_hash, &tid_less, NULL);
+  lock_init (&blocks_lock);
   process_control_block_init (INITIAL_USER_PROCESS_TID);
 }
 
@@ -55,8 +56,10 @@ init_process ()
 static void
 free_pcb (struct process_control_block *pcb)
 {
+  lock_acquire (&blocks_lock);
   hash_delete (&blocks, &pcb->blocks_elem);
   hash_destroy (&pcb->files, NULL);
+  lock_release (&blocks_lock);
   free (pcb);
 }
 
@@ -68,7 +71,9 @@ destroy_initial_process (void)
 {
   struct process_control_block *block = get_pcb_by_tid (INITIAL_USER_PROCESS_TID);
   free_pcb (block);
+  lock_acquire (&blocks_lock);
   hash_destroy (&blocks, NULL);
+  lock_release (&blocks_lock);
 }
 
 /* Creates and inserts a process control block into the PCB hash map. */
@@ -100,13 +105,23 @@ process_control_block_init (tid_t tid)
   sema_init (&block->load_sema, 0);
   list_init (&block->children);
   hash_init (&block->files, process_file_hash, fd_less, NULL);
+  lock_init (&block->pcb_lock);
 
+  lock_acquire (&blocks_lock);
   hash_insert (&blocks, &block->blocks_elem);
+  lock_release (&blocks_lock);
 
+  lock_acquire (&block->pcb_lock);
   /* If we have a parent, then we add our block to the parent's list of children. */
   struct process_control_block *parent_block = get_pcb_by_tid (thread_current ()->tid);
-  if (parent_block != NULL)
+
+  if (parent_block != NULL) {
+    lock_acquire (&parent_block->pcb_lock);
     list_push_back (&parent_block->children, &block->child_elem);
+    lock_release (&parent_block->pcb_lock);
+  }
+
+  lock_release (&block->pcb_lock);
 
   return true;
 }
@@ -114,7 +129,9 @@ process_control_block_init (tid_t tid)
 /* Closes and frees file pointed to by process_file pfile */
 static void
 process_file_close (struct process_file *pfile) {
+  lock_acquire (&fs_lock);
   file_close (pfile->file);
+  lock_release (&fs_lock);
   free (pfile);
 }
 
@@ -149,7 +166,7 @@ process_execute (const char *file_name)
   if (args == NULL)
     return TID_ERROR;
 
-  /* Make a copy of FILE_NAME, because we musn't modify file_name. */
+  /* Make a copy of FILE_NAME, because we mustn't modify file_name. */
   char *fn_copy = (char *) malloc ((1 + strlen (file_name)) * sizeof (char));
   if (fn_copy == NULL)
     return TID_ERROR;
@@ -210,9 +227,11 @@ start_process (void *file_name_)
      they can now return, and we tell them if we managed to successfully load
      their child process or not. */
   struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  lock_acquire (&pcb->pcb_lock);
   pcb->has_loaded = success;
+  lock_release (&pcb->pcb_lock);
   sema_up (&pcb->load_sema);
-
+  
   /* If load failed, quit. Make sure to free the memory allocated to
      the arguments. */
   if (!success) {
@@ -333,11 +352,13 @@ process_wait (tid_t child_tid)
   if (child_pcb == NULL || child_pcb->was_waited_on)
     return -1;
 
+
   /* If the tid does not correspond to a child of the current thread, return -1.*/
-
-  sema_down (&child_pcb->wait_sema);
+  lock_acquire (&child_pcb->pcb_lock);
   child_pcb->was_waited_on = true;
-
+  lock_release (&child_pcb->pcb_lock);
+  sema_down (&child_pcb->wait_sema);
+  
   return child_pcb->status;
 }
 
@@ -359,7 +380,7 @@ process_exit (void)
      to our executable. */
   process_remove_all_files ();
 
-  enum intr_level old_level = intr_disable ();
+  lock_acquire (&pcb->pcb_lock);
 
   struct list_elem *e;
 
@@ -378,14 +399,18 @@ process_exit (void)
   /* If we were still alive whilst our parent process was exiting, our PCB won't have 
      been freed. Therefore, it is our responsibility to free our own PCB. */
   struct process_control_block *parent_pcb = get_pcb_by_tid (pcb->parent_tid);
-  if (parent_pcb == NULL || parent_pcb->has_exited)
+  if (parent_pcb == NULL || parent_pcb->has_exited) {
+    lock_release (&pcb->pcb_lock);
     free_pcb (pcb);
+  } else {
+    /* Mark our process as having exited, so our parent and children know (needed when they exit to ensure
+     all PCBs are freed). */
+    pcb->has_exited = true;
 
-  /* Mark our process as having exited, so our parent and children know (needed when they exit to ensure
-     all PCBs are freed).*/
-  pcb->has_exited = true;
+    lock_release (&pcb->pcb_lock);
+  }
 
-  intr_set_level (old_level);
+  
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -403,6 +428,7 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+    
 }
 
 /* Sets up the CPU for running user code in the current
@@ -511,8 +537,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
+  lock_acquire (&fs_lock);
   file = filesys_open (file_name);
-
+  
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -603,11 +630,17 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* We add our own executable file to our PCB's files list, so that 
      we re-allow writing to it once we exit. */
-  process_add_file (file);
+  
   success = true;
 
  done:
   /* We arrive here whether the load is successful or not. */
+  if (success) {
+    process_add_file (file);
+  } else {
+    file_close (file);
+  }
+  lock_release (&fs_lock);
   return success;
 }
 
@@ -782,9 +815,12 @@ get_pcb_by_tid (tid_t tid)
 
   pcb.tid = tid;
 
+  lock_acquire (&blocks_lock);
   e = hash_find (&blocks, &pcb.blocks_elem);
+  struct process_control_block *block = e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
+  lock_release (&blocks_lock);
 
-  return e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
+  return block;
 }
 
 /* Returns the current process's process control block. */

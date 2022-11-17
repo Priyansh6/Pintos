@@ -29,6 +29,8 @@ struct process_control_block {
   struct list children;           /* Each process_control_block contains a list of all its children. */
   struct list_elem child_elem;    /* Required to embed process_control_blocks in a struct list. */
 
+  struct lock pcb_lock;
+
   int next_fd;                    /* Contains the next possible file descriptor for this process */
   struct hash files;              /* Map from file descriptors to struct process_file */
 };
@@ -44,6 +46,8 @@ struct process_file {
 
 /* Map from pid_t to struct process_control_block */
 static struct hash blocks;
+
+static struct lock blocks_lock;
 
 void init_process (void);
 void destroy_initial_process (void);
