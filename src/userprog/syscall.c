@@ -313,7 +313,7 @@ read_handler (void *args[])
       /* Reserved for writing to STDOUT. */
       exit_failure ();
       return 0;
-    default:
+    default: ;
       /* Read from a file on the file system into the buffer.*/
       struct file *file = process_get_file (*fd);
       if (file == NULL)
@@ -350,7 +350,7 @@ write_handler (void *args[])
       for (uint32_t i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT)
         putbuf (*(buffer) + i, MIN(MAX_CONSOLE_BUFFER_OUTPUT, *size - i));
       return *size;
-    default:
+    default: ;
       struct file *file = process_get_file (*fd);
       if (file == NULL)
         exit_failure ();
