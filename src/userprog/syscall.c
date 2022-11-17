@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
-#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "devices/input.h"
@@ -27,8 +26,6 @@ static bool is_valid_user_ptr (void *uaddr);
 static void get_args (void *esp, void *args[], int num_args);
 static void validate_args (void *args[], int argc);
 
-static struct file *get_file (int fd);
-static bool remove_file (int fd);
 static void assert_fd_greater_than (int fd, int highest_invalid_fd);
 static void assert_valid_fd (int fd);
 
@@ -45,8 +42,6 @@ static uint32_t write_handler (void *args[]);
 static uint32_t seek_handler (void *args[]);
 static uint32_t tell_handler (void *args[]);
 static uint32_t close_handler (void *args[]);
-
-static struct lock fs_lock;
 
 /* Map from system call number to the corresponding handler. We also
    provide the expected argument count (used to validate arguments later on). */
@@ -128,7 +123,11 @@ get_args (void *esp, void *args[], int num_args)
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
-  return uaddr && is_user_vaddr (uaddr) && pagedir_get_page (thread_current ()->pagedir, uaddr);
+  for (unsigned j = 0; j < sizeof (void *); j++) {
+    if (!((uaddr + j) && is_user_vaddr ((uaddr + j)) && pagedir_get_page (thread_current ()->pagedir, (uaddr + j))))
+      return false;
+  }
+  return true;
 }
 
 /* Every argument that the uses passes is a pointer - this function
@@ -138,37 +137,9 @@ static void
 validate_args (void *args[], int argc)
 {
   for (int i = 0; i < argc; i++) {
-    for (unsigned j = 0; j < sizeof (void *); j++) {
-      if (!is_valid_user_ptr (args[i] + j))
-        exit_failure ();
-    }
+    if (!is_valid_user_ptr (args[i]))
+      exit_failure ();
   }
-}
-
-static void
-free_hash_elem(struct hash_elem *e, void *aux UNUSED)
-{
-  struct process_control_block *pcb = hash_entry (e, struct process_control_block, blocks_elem);
-  free(pcb);
-}
-
-/* Gets file with file decriptor fd from the current running process's process
-   control block. Calls exit_failure if a file was not found. */
-static struct file *
-get_file (int fd) {
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  struct file *file = pcb_get_file (pcb, fd);
-  if (file == NULL)
-    exit_failure ();
-  return file;
-}
-
-/* Removes file with file descriptor fd from the current running process's process
-   control block and frees it from memory. Returns whether a file was removed. */
-static bool
-remove_file (int fd) {
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  return pcb_remove_file (pcb, fd);
 }
 
 /* Calls exit failure if fd is greater than highest_invalid_fd. */
@@ -189,14 +160,9 @@ assert_valid_fd (int fd) {
 static uint32_t
 halt_handler (void *args[] UNUSED)
 {
-  //free all entries in blocks hash table and the table itself
-  hash_destroy(&blocks, free_hash_elem);
-
-  //shutdown pintos
   shutdown_power_off();
-  destroy_initial_process ();
   thread_exit ();
-  //should never get here
+  /* Should never get here. */
   return 0;
 }
 
@@ -207,9 +173,7 @@ static uint32_t
 exit_handler (void *args[]) 
 {
   int *status_code = args[0];
-
-  get_pcb_by_tid (thread_current ()->tid)->status = *status_code;
-
+  process_set_status_code (*status_code);
   printf ("%s: exit(%d)\n", thread_current()->name, *status_code);
   thread_exit ();
   return 0;
@@ -230,10 +194,12 @@ exec_handler(void *args[])
   if (!VALIDATE_USER_POINTER (char *, *filename))
     exit_failure ();
 
-  tid_t tid = process_execute (*filename);
-  struct process_control_block *pcb = get_pcb_by_tid (tid);
-  sema_down (&pcb->load_sema);
-  return pcb->has_loaded ? tid : -1;
+  tid_t child_tid = process_execute (*filename);
+  
+  if (child_tid == TID_ERROR)
+    return TID_ERROR;
+
+  return process_wait_on_load (child_tid);
 }
 
 /* Makes the currently running process wait for one of
@@ -294,10 +260,12 @@ open_handler (void *args[])
     return -1;
   }
 
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
-  int fd = pcb_add_file (pcb, opened_file);
-  if (fd < 0)
+  int fd = process_add_file (opened_file);
+  if (fd < 0) {
     file_close (opened_file);
+    lock_release (&fs_lock);
+    return -1;
+  }
 
   lock_release (&fs_lock);
   return fd;
@@ -310,8 +278,11 @@ filesize_handler (void *args[])
   int *fd = args[0];
   assert_fd_greater_than (*fd, 1);
 
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
   lock_acquire (&fs_lock);
-  struct file *file = get_file (*fd);
   uint32_t length = file_length (file);
   lock_release (&fs_lock);
   return length;
@@ -344,10 +315,14 @@ read_handler (void *args[])
       /* Reserved for writing to STDOUT. */
       exit_failure ();
       return 0;
-    default:
+    default: ;
       /* Read from a file on the file system into the buffer.*/
+      struct file *file = process_get_file (*fd);
+      if (file == NULL)
+        exit_failure ();
+
       lock_acquire (&fs_lock);
-      uint32_t bytes_read = file_read (get_file(*fd), *buffer, *size);
+      uint32_t bytes_read = file_read (file, *buffer, *size);
       lock_release (&fs_lock);
       return bytes_read;
   }
@@ -374,13 +349,19 @@ write_handler (void *args[])
       return 0;
     case 1:
       /* Write the contents of the buffer to STDOUT. */
+      lock_acquire (&fs_lock);
       for (uint32_t i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT)
         putbuf (*(buffer) + i, MIN(MAX_CONSOLE_BUFFER_OUTPUT, *size - i));
+      lock_release (&fs_lock);
       return *size;
-    default:
+    default: ;
+      struct file *file = process_get_file (*fd);
+      if (file == NULL)
+        exit_failure ();
+
       /* Write the contents of the buffer to a file. */
       lock_acquire (&fs_lock);
-      uint32_t bytes_written = file_write (get_file(*fd), *buffer, *size);
+      uint32_t bytes_written = file_write (file, *buffer, *size);
       lock_release (&fs_lock);
       return bytes_written;
   }
@@ -394,7 +375,10 @@ seek_handler (void *args[])
   int *fd = args[0];
   uint32_t *position = args[1];
 
-  struct file *file = get_file (*fd);
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
   lock_acquire (&fs_lock);
   file_seek (file, *position);
   lock_release (&fs_lock);
@@ -407,8 +391,11 @@ static uint32_t
 tell_handler (void *args[]) 
 {
   int *fd = args[0];
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
   lock_acquire (&fs_lock);
-  struct file *file = get_file (*fd);
   uint32_t position = file_tell (file);
   lock_release (&fs_lock);
   return position;
@@ -422,8 +409,10 @@ close_handler (void *args[])
   int *fd = args[0];
   assert_fd_greater_than (*fd, 1);
 
-  lock_acquire (&fs_lock);
-  remove_file (*fd);
-  lock_release (&fs_lock);
+  struct file *file = process_get_file (*fd);
+  if (file == NULL)
+    exit_failure ();
+
+  process_remove_file (*fd);
   return 0;
 }

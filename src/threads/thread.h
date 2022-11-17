@@ -109,6 +109,7 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct process_control_block *pcb;  /* Pointer to the thread's process control block. */
 #endif
 
     /* Owned by thread.c. */
