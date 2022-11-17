@@ -19,8 +19,6 @@
 #define MAX_CONSOLE_BUFFER_OUTPUT 250
 #define MIN(x, y) ((x <= y) ? x : y)
 
-#define VALIDATE_USER_POINTER(type, x) is_valid_user_ptr ((type) (x))
-
 static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
 static void get_args (void *esp, void *args[], int num_args);
@@ -191,7 +189,7 @@ exec_handler(void *args[])
 
   /* Verify that we can dereference the filename string. */
   const char **filename = args[0];
-  if (!VALIDATE_USER_POINTER (char *, *filename))
+  if (!is_valid_user_ptr ((char *) *filename))
     exit_failure ();
 
   tid_t child_tid = process_execute (*filename);
@@ -217,7 +215,7 @@ create_handler (void *args[])
 {
   /* Verify that we can dereference the file string. */
   const char **file = args[0];
-  if (!VALIDATE_USER_POINTER (char *, *file))
+  if (!is_valid_user_ptr ((char *) *file))
     exit_failure ();
 
   off_t *initial_size = args[1];
@@ -235,7 +233,7 @@ remove_handler (void *args[])
 {
   /* Verify that we can dereference the file string. */
   const char **file = args[0];
-  if (!VALIDATE_USER_POINTER (char *, *file))
+  if (!is_valid_user_ptr ((char *) *file))
     exit_failure ();
 
   lock_acquire (&fs_lock);
@@ -250,7 +248,7 @@ open_handler (void *args[])
 {
   /* Verify that we can dereference the file string. */
   const char **file = args[0];
-  if (!VALIDATE_USER_POINTER (char *, *file))
+  if (!is_valid_user_ptr ((char *) *file))
     exit_failure ();
   
   lock_acquire (&fs_lock);
@@ -302,7 +300,7 @@ read_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!VALIDATE_USER_POINTER (char *, *buffer))
+  if (!is_valid_user_ptr ((char *) *buffer))
     exit_failure ();
 
   switch (*fd) {
@@ -339,7 +337,7 @@ write_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!VALIDATE_USER_POINTER (char *, *buffer))
+  if (!is_valid_user_ptr ((char *) *buffer))
     exit_failure ();
 
   switch (*fd) {
