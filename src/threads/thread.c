@@ -108,6 +108,11 @@ thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
+
+  /* Create a process control block for the main thread (so we can set it as a parent
+     to the initial user process' block). */
+  initial_thread->pcb = process_control_block_init (1);
+
   thread_create ("idle", PRI_MIN, idle, &idle_started);
 
   /* Start preemptive thread scheduling. */
@@ -191,16 +196,19 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
-  /* If the process is not the initial user process, then we create a process
-     control block for it. We have already made a process control block for the
-     initial user process, so we don't want to recreate it here. */
-  if (tid > 2)
-    process_control_block_init (tid);
 
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
   old_level = intr_disable ();
+
+  /* We don't want to make a process control block for the main 
+     thread (here - it is done in thread_start()) or the 
+     idle thread (nothing waits on it). */
+  if (tid > 2) {
+    t->pcb = process_control_block_init (tid);
+    t->pcb->parent_pcb = thread_current ()->pcb;
+  }
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);

@@ -29,7 +29,6 @@ static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 static void process_file_close (struct process_file *pfile);
-static void free_pcb (struct process_control_block *pcb);
 static bool is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write);
 
 static bool tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
@@ -39,44 +38,17 @@ static bool fd_less (const struct hash_elem *a, const struct hash_elem *b, void 
 static unsigned process_file_hash (const struct hash_elem *elem, void *aux UNUSED);
 static void process_file_hash_close (struct hash_elem *e, void *aux UNUSED);
 
-/* Called in init.c when Pintos first starts up (and is running a user program).
-   Initialises the PCB hash map and creates a PCB for the first user process thread
-   (i.e first thread which is not MAIN or IDLE). */
-void
-init_process () 
-{
-  hash_init (&blocks, &block_hash, &tid_less, NULL);
-  lock_init (&blocks_lock);
-  //process_control_block_init (INITIAL_USER_PROCESS_TID);
-}
-
-/* Deletes the reference to a given PCB from the PCB hash map and
-   free the memory allocated to the given PCB. */
-static void
-free_pcb (struct process_control_block *pcb)
-{
-  lock_acquire (&blocks_lock);
-  hash_delete (&blocks, &pcb->blocks_elem);
-  hash_destroy (&pcb->files, NULL);
-  lock_release (&blocks_lock);
-  free (pcb);
-}
-
 /* Called when the main thread is about to exit. Frees and deletes the process
    control block made in init_process from the hash map (as it has no parent to free it) 
    and also destroys the process control blocks hash map. */
 void
 destroy_initial_process (void)
 {
-  struct process_control_block *block = get_pcb_by_tid (INITIAL_USER_PROCESS_TID);
-  free_pcb (block);
-  lock_acquire (&blocks_lock);
-  hash_destroy (&blocks, NULL);
-  lock_release (&blocks_lock);
+  free (thread_current()->pcb);
 }
 
 /* Creates and inserts a process control block into the PCB hash map. */
-bool
+struct process_control_block *
 process_control_block_init (tid_t tid)
 {
 
@@ -85,10 +57,9 @@ process_control_block_init (tid_t tid)
      in destroy_initial_process. */
   struct process_control_block *block = (struct process_control_block *) malloc (sizeof (struct process_control_block));
   if (block == NULL)
-    return false;
+    return NULL;
 
   block->tid = tid;
-  block->parent_tid = thread_current ()->tid;
 
   /* Assume that if a process does not update this in a call to exit() 
      then the process has not executed correctly - so we set the initial
@@ -105,18 +76,13 @@ process_control_block_init (tid_t tid)
   list_init (&block->children);
   hash_init (&block->files, process_file_hash, fd_less, NULL);
 
-  lock_acquire (&blocks_lock);
-  hash_insert (&blocks, &block->blocks_elem);
-  lock_release (&blocks_lock);
-
   /* If we have a parent, then we add our block to the parent's list of children. */
-  struct process_control_block *parent_block = get_pcb_by_tid (thread_current ()->tid);
+  struct process_control_block *parent_block = thread_current ()->pcb;
 
-  if (parent_block != NULL) {
+  if (parent_block != NULL)
     list_push_back (&parent_block->children, &block->child_elem);
-  }
 
-  return true;
+  return block;
 }
 
 /* Closes and frees file pointed to by process_file pfile */
@@ -213,7 +179,7 @@ start_process (void *file_name_)
   /* We can let any parent process that has made a call to exec know that 
      they can now return, and we tell them if we managed to successfully load
      their child process or not. */
-  struct process_control_block *pcb = get_pcb_by_tid (thread_current ()->tid);
+  struct process_control_block *pcb = thread_current ()->pcb;
   pcb->has_loaded = success;
   sema_up (&pcb->load_sema);
   
@@ -330,13 +296,22 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
-  struct process_control_block *child_pcb = get_pcb_by_tid (child_tid);
+  struct process_control_block *child_pcb;
+
+  struct list_elem *e;
+  for (e = list_begin (&thread_current ()->pcb->children); e != list_end (&thread_current ()->pcb->children); e = list_next (e)) {
+    child_pcb = list_entry (e, struct process_control_block, child_elem);
+
+    if (child_pcb->tid == child_tid)
+      break;
+
+    child_pcb = NULL;
+  }
 
   /* If the tid does not correspond to a PCB or if we have already waited on
      it, then return -1. */
   if (child_pcb == NULL || child_pcb->was_waited_on)
     return -1;
-
 
   /* If the tid does not correspond to a child of the current thread, return -1.*/
   child_pcb->was_waited_on = true;
@@ -353,12 +328,12 @@ process_exit (void)
   uint32_t *pd;
 
   /* Gets our own PCB. */
-  struct process_control_block *pcb = get_pcb_by_tid (cur->tid);
+  struct process_control_block *pcb = thread_current ()->pcb;
 
   /* Close all files open by the current process and remove all
      files from our PCB's file list. Also handles re-allowing writes
      to our executable. */
-  process_remove_all_files ();
+  process_destroy_files ();
 
   struct list_elem *e;
 
@@ -371,7 +346,7 @@ process_exit (void)
 
     /* Free our child's PCB if it has exited. */
     if (child_pcb->has_exited)
-      free_pcb (child_pcb);
+      free (child_pcb);
   }
 
   /* Mark our process as having exited, so our parent and children know (needed when they exit to ensure
@@ -380,13 +355,12 @@ process_exit (void)
 
   /* If we were still alive whilst our parent process was exiting, our PCB won't have 
      been freed. Therefore, it is our responsibility to free our own PCB. */
-  struct process_control_block *parent_pcb = get_pcb_by_tid (pcb->parent_tid);
+  struct process_control_block *parent_pcb = thread_current ()->pcb->parent_pcb;
+
   /* Allow any parent process waiting on our process to continue. */
   sema_up (&pcb->wait_sema);
-  if (parent_pcb == NULL || parent_pcb->has_exited) {
-    free_pcb (pcb);
-  } else {
-  }
+  if (parent_pcb == NULL || parent_pcb->has_exited)
+    free (pcb);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -782,34 +756,13 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
 
-/* Finds and returns a pointer to the process control block in the blocks hash map. */
-struct process_control_block *
-get_pcb_by_tid (tid_t tid)
-{
-  struct process_control_block pcb;
-  struct hash_elem *e;
-
-  pcb.tid = tid;
-
-  lock_acquire (&blocks_lock);
-  e = hash_find (&blocks, &pcb.blocks_elem);
-  struct process_control_block *block = e != NULL ? hash_entry (e, struct process_control_block, blocks_elem) : NULL;
-  lock_release (&blocks_lock);
-
-  return block;
-}
-
-/* Returns the current process's process control block. */
-static struct process_control_block *
-process_get_pcb (void) {
-  return get_pcb_by_tid (thread_current ()->tid);
-}
 
 /* Adds a file to current process's pcb as well as assigning it a file 
    descriptor, which it returns. Returns -1 if fails */
 int
 process_add_file (struct file* file) {
-  struct process_control_block *pcb = process_get_pcb ();
+
+  struct process_control_block *pcb = thread_current ()->pcb;
 
   struct process_file *pfile = (struct process_file *) malloc (sizeof (struct process_file));
   if (pfile == NULL)
@@ -829,7 +782,7 @@ process_add_file (struct file* file) {
    NULL if no file could be found. */
 static struct process_file *
 process_get_process_file (int fd) {
-  struct process_control_block *pcb = process_get_pcb ();
+  struct process_control_block *pcb = thread_current ()->pcb;
 
   struct process_file pfile;
   pfile.fd = fd;
@@ -856,34 +809,17 @@ process_remove_file (int fd) {
     return false;
   }
 
-  hash_delete (&process_get_pcb ()->files, &pfile->hash_elem);
+  hash_delete (&thread_current ()->pcb->files, &pfile->hash_elem);
   process_file_close (pfile);
   return true;
 }
 
 /* Removes all files associated with current process's pcb. */
 void
-process_remove_all_files (void) {
-  struct process_control_block *pcb = process_get_pcb ();
+process_destroy_files (void) {
+  struct process_control_block *pcb = thread_current ()->pcb;
 
-  hash_clear (&pcb->files, process_file_hash_close);
-}
-
-/* Compares process_control_blocks on the basis of their associated tid. */
-static bool 
-tid_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
-  const struct process_control_block *pcb_a = hash_entry (a, struct process_control_block, blocks_elem);
-  const struct process_control_block *pcb_b = hash_entry (b, struct process_control_block, blocks_elem);
-
-  return pcb_a->tid < pcb_b->tid;
-}
-
-/* Hashes the tid field of a process control block */
-static unsigned 
-block_hash (const struct hash_elem *elem, void *aux UNUSED) {
-  const struct process_control_block *pcb = hash_entry (elem, struct process_control_block, blocks_elem);
-
-  return hash_int (pcb->tid);
+  hash_destroy (&pcb->files, process_file_hash_close);
 }
 
 /* Compares process_files on the basis of their associated file descriptors. */

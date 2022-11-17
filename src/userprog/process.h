@@ -13,7 +13,8 @@
    descriptors associated with the process. */
 struct process_control_block {
   tid_t tid;                      /* tid of process. */
-  tid_t parent_tid;               /* tid of parent process */
+
+  struct process_control_block *parent_pcb;               /* tid of parent process */
 
   int status;                     /* Stores the exit status of this process. */
   bool was_waited_on;             /* Processes can't be waited on more than once. */
@@ -23,8 +24,6 @@ struct process_control_block {
   
   struct semaphore wait_sema;     /* Semaphore to synchronise parent and child process. */
   struct semaphore load_sema;
-
-  struct hash_elem blocks_elem;   /* Enables process_control_block to be in struct hash. */
 
   struct list children;           /* Each process_control_block contains a list of all its children. */
   struct list_elem child_elem;    /* Required to embed process_control_blocks in a struct list. */
@@ -42,11 +41,6 @@ struct process_file {
   struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
 
-/* Map from pid_t to struct process_control_block */
-static struct hash blocks;
-
-static struct lock blocks_lock;
-
 void init_process (void);
 void destroy_initial_process (void);
 tid_t process_execute (const char *file_name);
@@ -54,11 +48,10 @@ int process_wait (tid_t);
 void process_exit (void);
 void process_activate (void);
 
-bool process_control_block_init (tid_t tid);
-struct process_control_block *get_pcb_by_tid (tid_t tid);
+struct process_control_block *process_control_block_init (tid_t tid);
 int process_add_file (struct file* file);
 struct file *process_get_file (int fb);
 bool process_remove_file (int fd);
-void process_remove_all_files (void);
+void process_destroy_files (void);
 
 #endif /* userprog/process.h */

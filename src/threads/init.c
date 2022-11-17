@@ -130,18 +130,14 @@ main (void)
   filesys_init (format_filesys);
 #endif
 
-#ifdef USERPROG
-  init_process ();
-#endif
-
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
   run_actions (argv);
 
   /* Finish up. */
-  shutdown ();
   destroy_initial_process ();
+  shutdown ();
   thread_exit ();
 }
 

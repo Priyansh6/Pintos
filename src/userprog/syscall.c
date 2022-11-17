@@ -140,13 +140,6 @@ validate_args (void *args[], int argc)
   }
 }
 
-static void
-free_hash_elem(struct hash_elem *e, void *aux UNUSED)
-{
-  struct process_control_block *pcb = hash_entry (e, struct process_control_block, blocks_elem);
-  free(pcb);
-}
-
 /* Calls exit failure if fd is greater than highest_invalid_fd. */
 static void
 assert_fd_greater_than (int fd, int highest_invalid_fd) {
@@ -165,12 +158,11 @@ assert_valid_fd (int fd) {
 static uint32_t
 halt_handler (void *args[] UNUSED)
 {
-  //free all entries in blocks hash table and the table itself
-  hash_destroy(&blocks, free_hash_elem);
 
   //shutdown pintos
-  shutdown_power_off();
+  
   destroy_initial_process ();
+  shutdown_power_off();
   thread_exit ();
   //should never get here
   return 0;
@@ -184,7 +176,7 @@ exit_handler (void *args[])
 {
   int *status_code = args[0];
 
-  struct process_control_block *block = get_pcb_by_tid (thread_current ()->tid);
+  struct process_control_block *block = thread_current ()->pcb;
   
   block->status = *status_code;
   printf ("%s: exit(%d)\n", thread_current()->name, *status_code);
@@ -209,9 +201,24 @@ exec_handler(void *args[])
     exit_failure ();
 
   tid_t tid = process_execute (*filename);
-  struct process_control_block *pcb = get_pcb_by_tid (tid);
+
+  if (tid == TID_ERROR)
+    return TID_ERROR;
+
+  struct process_control_block *pcb;
+
+  struct list_elem *e;
+  for (e = list_begin (&thread_current ()->pcb->children); e != list_end (&thread_current ()->pcb->children); e = list_next (e)) {
+    pcb = list_entry (e, struct process_control_block, child_elem);
+
+    if (pcb->tid == tid)
+      break;
+
+    pcb = NULL;
+  }
+
   sema_down (&pcb->load_sema);
-  return pcb->has_loaded ? tid : -1;
+  return pcb->has_loaded ? tid : TID_ERROR;
 }
 
 /* Makes the currently running process wait for one of
