@@ -3,8 +3,11 @@
 
 #include "filesys/file.h"
 #include "threads/thread.h"
+#include "threads/synch.h"
+#include "hash.h"
+#include "list.h"
 
-void destroy_blocks (void);
+struct process_control_block;
 
 void init_process (void);
 void process_set_status_code (int status_code);
@@ -14,9 +17,12 @@ int process_wait (tid_t);
 void process_exit (void);
 void process_activate (void);
 
+struct process_control_block *process_control_block_init (tid_t tid);
+void pcb_set_parent (struct process_control_block *child, struct process_control_block *parent);
+struct process_control_block *pcb_get_child_by_tid (tid_t child_tid);
 int process_add_file (struct file* file);
 struct file *process_get_file (int fb);
 bool process_remove_file (int fd);
-void process_remove_all_files (void);
+void process_destroy_files (void);
 
 #endif /* userprog/process.h */

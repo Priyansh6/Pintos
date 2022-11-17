@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
-#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "devices/input.h"
@@ -43,8 +42,6 @@ static uint32_t write_handler (void *args[]);
 static uint32_t seek_handler (void *args[]);
 static uint32_t tell_handler (void *args[]);
 static uint32_t close_handler (void *args[]);
-
-static struct lock fs_lock;
 
 /* Map from system call number to the corresponding handler. We also
    provide the expected argument count (used to validate arguments later on). */
@@ -163,8 +160,7 @@ assert_valid_fd (int fd) {
 static uint32_t
 halt_handler (void *args[] UNUSED)
 {
-  shutdown_power_off ();
-  destroy_blocks ();
+  shutdown_power_off();
   thread_exit ();
   /* Should never get here. */
   return 0;
@@ -178,7 +174,6 @@ exit_handler (void *args[])
 {
   int *status_code = args[0];
   process_set_status_code (*status_code);
-
   printf ("%s: exit(%d)\n", thread_current()->name, *status_code);
   thread_exit ();
   return 0;
@@ -200,6 +195,10 @@ exec_handler(void *args[])
     exit_failure ();
 
   tid_t child_tid = process_execute (*filename);
+  
+  if (child_tid == TID_ERROR)
+    return TID_ERROR;
+
   return process_wait_on_load (child_tid);
 }
 
@@ -264,6 +263,7 @@ open_handler (void *args[])
   int fd = process_add_file (opened_file);
   if (fd < 0) {
     file_close (opened_file);
+    lock_release (&fs_lock);
     return -1;
   }
 
@@ -349,8 +349,10 @@ write_handler (void *args[])
       return 0;
     case 1:
       /* Write the contents of the buffer to STDOUT. */
+      lock_acquire (&fs_lock);
       for (uint32_t i = 0; i < *size; i += MAX_CONSOLE_BUFFER_OUTPUT)
         putbuf (*(buffer) + i, MIN(MAX_CONSOLE_BUFFER_OUTPUT, *size - i));
+      lock_release (&fs_lock);
       return *size;
     default: ;
       struct file *file = process_get_file (*fd);
@@ -411,8 +413,6 @@ close_handler (void *args[])
   if (file == NULL)
     exit_failure ();
 
-  lock_acquire (&fs_lock);
   process_remove_file (*fd);
-  lock_release (&fs_lock);
   return 0;
 }

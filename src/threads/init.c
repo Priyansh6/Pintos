@@ -120,18 +120,11 @@ main (void)
   serial_init_queue ();
   timer_calibrate ();
 
-
-
-
 #ifdef FILESYS
   /* Initialize file system. */
   ide_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
-#endif
-
-#ifdef USERPROG
-  init_process ();
 #endif
 
   printf ("Boot complete.\n");
@@ -140,8 +133,8 @@ main (void)
   run_actions (argv);
 
   /* Finish up. */
+  free (thread_current()->pcb);
   shutdown ();
-  destroy_blocks ();
   thread_exit ();
 }
 
