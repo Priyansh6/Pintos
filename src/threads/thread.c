@@ -109,9 +109,11 @@ thread_start (void)
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
 
+  #ifdef USERPROG
   /* Create a process control block for the main thread (so we can set it as a parent
      to the initial user process' block). */
   initial_thread->pcb = process_control_block_init (1);
+  #endif
 
   thread_create ("idle", PRI_MIN, idle, &idle_started);
 
@@ -202,6 +204,7 @@ thread_create (const char *name, int priority,
      member cannot be observed. */
   old_level = intr_disable ();
 
+  #ifdef USERPROG
   /* We don't want to make a process control block for the main 
      thread (here - it is done in thread_start()) or the 
      idle thread (nothing waits on it). */
@@ -209,6 +212,7 @@ thread_create (const char *name, int priority,
     t->pcb = process_control_block_init (tid);
     pcb_set_parent (t->pcb, thread_current ()->pcb);
   }
+  #endif
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);

@@ -133,7 +133,9 @@ main (void)
   run_actions (argv);
 
   /* Finish up. */
+  #ifdef USERPROG
   free (thread_current()->pcb);
+  #endif
   shutdown ();
   thread_exit ();
 }
