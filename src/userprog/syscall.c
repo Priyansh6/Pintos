@@ -124,11 +124,7 @@ get_args (void *esp, void *args[], int num_args)
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
-  for (unsigned j = 0; j < sizeof (void *); j++) {
-    if (!((uaddr + j) && is_user_vaddr ((uaddr + j)) && pagedir_get_page (thread_current ()->pagedir, (uaddr + j))))
-      return false;
-  }
-  return true;
+  return (uaddr) && is_user_vaddr (uaddr) && pagedir_get_page (thread_current ()->pagedir, uaddr);
 }
 
 /* Every argument that the uses passes is a pointer - this function
