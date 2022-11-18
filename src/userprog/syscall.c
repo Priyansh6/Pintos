@@ -66,6 +66,9 @@ syscall_init (void)
   lock_init (&fs_lock);
 }
 
+/* Finds which system call handler to execute from the provided interrupt frame, gets the 
+   arguments from the frame, and puts the result of the system call handler into the eax
+   register of the interrupt frame. */
 static void
 syscall_handler (struct intr_frame *f) 
 {
@@ -138,7 +141,8 @@ validate_args (void *args[], int argc)
 
 /* Calls exit failure if fd is greater than highest_invalid_fd. */
 static void
-assert_fd_greater_than (int fd, int highest_invalid_fd) {
+assert_fd_greater_than (int fd, int highest_invalid_fd)
+{
   if (fd <= highest_invalid_fd)
     exit_failure ();
 }
@@ -146,7 +150,8 @@ assert_fd_greater_than (int fd, int highest_invalid_fd) {
 /* Checks if provided file descriptor is valid (greater than 0) and calls exit_failure
    if it isn't. */
 static void
-assert_valid_fd (int fd) {
+assert_valid_fd (int fd)
+{
   assert_fd_greater_than (fd, -1);
 }
 
@@ -182,7 +187,6 @@ exit_handler (void *args[])
 static uint32_t
 exec_handler(void *args[]) 
 {
-
   /* Verify that we can dereference the filename string. */
   const char **filename = args[0];
   if (!is_valid_user_ptr ((char *) *filename))
@@ -238,7 +242,7 @@ remove_handler (void *args[])
   return result;
 }
 
-/* Opens a file. */
+/* Opens a file and returns -1 if it fails. */
 static uint32_t 
 open_handler (void *args[])
 {

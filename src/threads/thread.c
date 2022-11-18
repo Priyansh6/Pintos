@@ -245,7 +245,7 @@ thread_create (const char *name, int priority,
      idle thread (nothing waits on it). */
   if (tid > 2) {
     t->pcb = process_control_block_init (tid);
-    pcb_set_parent (t->pcb, thread_current ()->pcb);
+    pcb_set_parent (t->pcb, process_get_pcb ());
   }
   #endif
 
