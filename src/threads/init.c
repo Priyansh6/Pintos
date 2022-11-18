@@ -134,6 +134,7 @@ main (void)
 
   /* Finish up. */
   #ifdef USERPROG
+  process_destroy_files ();
   free (thread_current()->pcb);
   #endif
   shutdown ();
