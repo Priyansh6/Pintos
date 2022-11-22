@@ -9,7 +9,7 @@
 void *
 frame_table_get_frame (void *upage)
 {
-    void * frame_addr =  palloc_get_page (PAL_USER);
+    void * frame_addr = palloc_get_page (PAL_USER);
 
     printf("%d\n", vtop (frame_addr));
     
@@ -29,8 +29,11 @@ frame_table_get_frame (void *upage)
 }
 
 void 
-frame_table_free_frame ()
+frame_table_free_frame (uintptr_t frame_no)
 {
-
+    struct frame_table_entry *fte = frame_table[frame_no];
+    palloc_free_page (ptov (frame_no));
+    frame_table[frame_no] = NULL;
+    free (fte);
 }
 
