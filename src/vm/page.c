@@ -1,42 +1,64 @@
 #include <hash.h>
 #include <stdio.h>
+#include <string.h>
+#include "threads/interrupt.h"
+#include "threads/thread.h"
 #include "threads/malloc.h"
-#include "page.h"
+#include "threads/palloc.h"
+#include "userprog/pagedir.h"
+#include "userprog/syscall.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
-void load_page_from_filesys (void) {
+bool load_page_from_filesys (struct spt_entry *entry) {
+    /* We can't be in an interrupt when we call this function since we try to acquire 
+       fs_lock. If another process had already acquired the fs_lock then we would
+       deadlock. */
+    ASSERT (!intr_context ())
+
+    lock_acquire (&fs_lock);
+
+    file_seek (entry->file, entry->ofs);
+
     /* Check if virtual page already allocated */
-    // struct thread *t = thread_current ();
-    // uint8_t *kpage = pagedir_get_page (t->pagedir, upage);
+    struct thread *t = thread_current ();
+    uint8_t *kpage = pagedir_get_page (t->pagedir, entry->uaddr);
     
-    // if (kpage == NULL){
+    if (kpage == NULL){
     
-    //   /* Get a new page of memory. */
-    //   kpage = frame_table_get_frame (upage, PAL_USER);
+      /* Get a new page of memory. */
+      kpage = frame_table_get_frame (entry->uaddr, PAL_USER);
     
-    //   if (kpage == NULL)
-    //     return false;
+      if (kpage == NULL)
+        return false;
     
-    //   /* Add the page to the process's address space. */
-    //   if (!install_page (upage, kpage, writable)) 
-    //   {
-    //     frame_table_free_frame (kpage);
-    //     return false; 
-    //   }     
-    
-    // } else {
-    
-    //   /* Check if writable flag for the page should be updated */
-    //   if(writable && !pagedir_is_writable(t->pagedir, upage)){
-    //     pagedir_set_writable(t->pagedir, upage, writable); 
-    //   }
-    
-    // }
+      /* Add the page to the process's address space. */
+      if (pagedir_get_page (t->pagedir, entry->uaddr) != NULL
+          || !pagedir_set_page (t->pagedir, entry->uaddr, kpage, entry->writable))
+      {
+        frame_table_free_frame (kpage);
+        lock_release (&fs_lock);
+        return false; 
+      }     
+    } else {
+      /* Check if writable flag for the page should be updated */
+      if(entry->writable && !pagedir_is_writable(t->pagedir, entry->uaddr)){
+        pagedir_set_writable(t->pagedir, entry->uaddr, entry->writable); 
+      }
+    }
 
-    // /* Load data into the page. */
-    // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes) {
-    //   return false; 
-    // }
-    // memset (kpage + page_read_bytes, 0, page_zero_bytes);
+    /* Load data into the page. */
+    if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes) {
+      lock_release (&fs_lock);
+      return false; 
+    }
+
+    // hex_dump (0, pagedir_get_page (t->pagedir, entry->uaddr), 4096, false);
+
+    memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
+ 
+    lock_release (&fs_lock);
+    return true;
 }
 
 void free_spt_entry (struct hash_elem *elem, void *aux UNUSED) {

@@ -1,10 +1,12 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
-#include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/gdt.h"
 #include "userprog/syscall.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -141,15 +143,51 @@ page_fault (struct intr_frame *f)
   /* Count page faults. */
   page_fault_cnt++;
 
+  printf("Address: %p\n", pg_round_down (fault_addr));
+
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
   /* If the user attempts to directly derefence a NULL pointer, exit immediately. */
-  if (user)
-     exit_failure ();
+  if (user) {
+   struct hash spt = thread_current ()->spt;
+   
+   struct spt_entry spt_entry;
+   spt_entry.uaddr = pg_round_down (fault_addr);
 
+   struct hash_elem *found_elem = hash_find (&spt, &spt_entry.spt_hash_elem);
+   struct spt_entry *entry = found_elem == NULL ? NULL : hash_entry (found_elem, struct spt_entry, spt_hash_elem);
+
+   if (entry == NULL) {
+      PANIC ("ASDMASD");
+      // exit_failure ();
+   }
+     
+   switch (entry->entry_type) {
+      case SWAP:
+         break;
+      case FSYS:
+         if (!load_page_from_filesys (entry)) {
+            printf("Failed to load page from filesystem.\n");
+            
+            exit_failure ();
+         }
+         printf("Cameron smells AMAZING\n");
+
+         return;
+
+         break;
+      case ZEROPAGE:
+         break;
+   }
+
+   
+
+  }
+     
+   
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */

@@ -762,6 +762,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       
       struct spt_entry *page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
 
+      page->uaddr = upage;
       page->entry_type = FILESYS;
       page->file = file;
       page->ofs = ofs;
@@ -807,8 +808,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       
 
       /* Advance. */
+      
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;

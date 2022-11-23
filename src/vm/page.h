@@ -24,7 +24,7 @@ struct spt_entry {
 
 void free_spt_entry (struct hash_elem *elem, void *aux UNUSED);
 
-void load_page_from_filesys (void);
+bool load_page_from_filesys (struct spt_entry *entry);
 
 unsigned spt_hash_func (const struct hash_elem *elem, void *aux UNUSED);
 bool spt_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
