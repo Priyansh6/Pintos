@@ -12,7 +12,9 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
+#include <hash.h>
 #include "userprog/process.h"
+#include "vm/page.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -212,6 +214,8 @@ thread_create (const char *name, int priority,
     t->pcb = process_control_block_init (tid);
     pcb_set_parent (t->pcb, process_get_pcb ());
   }
+
+  hash_init (&t->spt, &spt_hash_func, &spt_less_func, NULL);
   #endif
 
   /* Stack frame for kernel_thread(). */
