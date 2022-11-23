@@ -5,21 +5,21 @@ tests/%.output: PUTFILES = $(filter-out kernel.bin loader.bin, $^)
 
 tests/userprog_TESTS = $(addprefix tests/userprog/,args-none		\
 args-single args-multiple args-many args-dbl-space sc-bad-sp		\
-sc-bad-arg sc-boundary sc-boundary-2 halt exit create-normal		\
+sc-bad-arg sc-bad-num sc-boundary sc-boundary-2 halt exit create-normal		\
 create-empty create-null create-bad-ptr create-long create-exists	\
 create-bound open-normal open-missing open-boundary open-empty		\
 open-null open-bad-ptr open-twice close-normal close-twice close-stdin	\
 close-stdout close-bad-fd read-normal read-bad-ptr read-boundary	\
 read-zero read-stdout read-bad-fd write-normal write-bad-ptr		\
 write-boundary write-zero write-stdin write-bad-fd exec-once exec-arg	\
-exec-large-arg                                                      \
-exec-multiple exec-missing exec-bad-ptr wait-simple wait-twice		\
-wait-killed wait-bad-pid multi-recurse multi-child-fd rox-simple	\
+exec-large-arg exec-multiple exec-missing exec-over-arg exec-over-args \
+exec-bad-ptr wait-simple wait-twice wait-killed exec-wait-kill \
+wait-bad-pid wait-bad-child multi-recurse multi-child-fd rox-simple	\
 rox-child rox-multichild bad-read bad-write bad-read2 bad-write2        \
 bad-jump bad-jump2)
 
 tests/userprog_PROGS = $(tests/userprog_TESTS) $(addprefix \
-tests/userprog/,child-simple child-args child-bad child-close child-rox)
+tests/userprog/,child-simple child-args child-bad child-close child-rox exec-exit)
 
 tests/userprog/args-none_SRC = tests/userprog/args.c
 tests/userprog/args-single_SRC = tests/userprog/args.c
@@ -28,6 +28,7 @@ tests/userprog/args-many_SRC = tests/userprog/args.c
 tests/userprog/args-dbl-space_SRC = tests/userprog/args.c
 tests/userprog/sc-bad-sp_SRC = tests/userprog/sc-bad-sp.c tests/main.c
 tests/userprog/sc-bad-arg_SRC = tests/userprog/sc-bad-arg.c tests/main.c
+tests/userprog/sc-bad-num_SRC = tests/userprog/sc-bad-num.c tests/main.c
 tests/userprog/bad-read_SRC = tests/userprog/bad-read.c tests/main.c
 tests/userprog/bad-write_SRC = tests/userprog/bad-write.c tests/main.c
 tests/userprog/bad-jump_SRC = tests/userprog/bad-jump.c tests/main.c
@@ -81,11 +82,15 @@ tests/userprog/exec-arg_SRC = tests/userprog/exec-arg.c tests/main.c
 tests/userprog/exec-large-arg_SRC = tests/userprog/exec-large-arg.c tests/main.c
 tests/userprog/exec-multiple_SRC = tests/userprog/exec-multiple.c tests/main.c
 tests/userprog/exec-missing_SRC = tests/userprog/exec-missing.c tests/main.c
+tests/userprog/exec-over-arg_SRC = tests/userprog/exec-over-arg.c tests/main.c
+tests/userprog/exec-over-args_SRC = tests/userprog/exec-over-args.c tests/main.c
 tests/userprog/exec-bad-ptr_SRC = tests/userprog/exec-bad-ptr.c tests/main.c
 tests/userprog/wait-simple_SRC = tests/userprog/wait-simple.c tests/main.c
 tests/userprog/wait-twice_SRC = tests/userprog/wait-twice.c tests/main.c
 tests/userprog/wait-killed_SRC = tests/userprog/wait-killed.c tests/main.c
+tests/userprog/exec-wait-kill_SRC = tests/userprog/exec-wait-kill.c tests/main.c
 tests/userprog/wait-bad-pid_SRC = tests/userprog/wait-bad-pid.c tests/main.c
+tests/userprog/wait-bad-child_SRC = tests/userprog/wait-bad-child.c tests/main.c
 tests/userprog/multi-recurse_SRC = tests/userprog/multi-recurse.c
 tests/userprog/multi-child-fd_SRC = tests/userprog/multi-child-fd.c	\
 tests/main.c
@@ -99,6 +104,7 @@ tests/userprog/child-args_SRC = tests/userprog/args.c
 tests/userprog/child-bad_SRC = tests/userprog/child-bad.c tests/main.c
 tests/userprog/child-close_SRC = tests/userprog/child-close.c
 tests/userprog/child-rox_SRC = tests/userprog/child-rox.c
+tests/userprog/exec-exit_SRC = tests/userprog/exec-exit.c
 
 $(foreach prog,$(tests/userprog_PROGS),$(eval $(prog)_SRC += tests/lib.c))
 
@@ -130,7 +136,12 @@ tests/userprog/wait-twice_PUTFILES += tests/userprog/child-simple
 
 tests/userprog/exec-arg_PUTFILES += tests/userprog/child-args
 tests/userprog/exec-large-arg_PUTFILES += tests/userprog/child-args
+tests/userprog/exec-over-arg_PUTFILES += tests/userprog/child-args
+tests/userprog/exec-over-args_PUTFILES += tests/userprog/child-args
 tests/userprog/multi-child-fd_PUTFILES += tests/userprog/child-close
 tests/userprog/wait-killed_PUTFILES += tests/userprog/child-bad
+tests/userprog/exec-wait-kill_PUTFILES += tests/userprog/child-bad
+tests/userprog/wait-bad-child_PUTFILES += tests/userprog/exec-exit
+tests/userprog/wait-bad-child_PUTFILES += tests/userprog/child-simple
 tests/userprog/rox-child_PUTFILES += tests/userprog/child-rox
 tests/userprog/rox-multichild_PUTFILES += tests/userprog/child-rox

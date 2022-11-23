@@ -956,8 +956,23 @@ same process, or you can use a more complex mapping.  It's up to you.
 @item What should I expect from the Task 2 code-review?
 
 The code-review for this task will be conducted with each group in-person.
+Our Task 2 code-review will cover @strong{four} main areas: 
+functional correctness, efficiency, design quality and general coding style.
 
-More details coming soon...
+@itemize @bullet
+@item For @strong{functional correctness}, we will be looking to see if your argument passing code can avoid stack-overflow for all possible input command lines.
+We will also be checking if your data structures for storing file descriptors, your file-system accesses and your implementation of the @func{wait} and @func{exit} system calls are all free of any race conditions.
+
+@item For @strong{efficiency}, we will be looking at how you are storing the process parent/child relationships, how you are storing child load status and ensuring that your code does not leak memory in any situation.
+
+@item For @strong{design quality}, we will be looking at how you have abstracted your argument passing code from the underlying stack updates (pushing arguments and their pointers onto the stack) and your system call handler to avoid repetitive code for each syscall case.
+We will also be looking at the level of fidelity in your use of synchronisation for the @func{exec}, @func{wait} and @func{exit} system calls.
+
+@item For @strong{general coding style}, we will be paying attention to all of the usual elements of good style 
+that you should be used to from last year (e.g. consistent code layout, appropriate use of comments, avoiding magic numbers, etc.)
+as well as your use of git (e.g. commit frequency and commit message quality).
+In this task, we will be paying particular attention to magic numbers in your system call handler, as well as your use of global variables anywhere in your solution.
+@end itemize
 @end table
 
 @menu

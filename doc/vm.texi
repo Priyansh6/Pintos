@@ -810,7 +810,24 @@ thus ruling out the possibility of any such overlap.
 @item What should I expect from the Task 3 code-review?
 
 The code-review for this task will be conducted with each group in-person.
+Our Task 3 code-review will cover @strong{four} main areas: 
+functional correctness, efficiency, design quality and general coding style.
 
-More details coming soon...
+@itemize @bullet
+@item For @strong{functional correctness}, we will be looking to see if your code for page sharing accurately tracks the accessed/dirty status of each shared page and if your stack-fault heuristic is correct.
+We will also be checking if your code for page allocation, page fault handling and memory mapping/unmapping is free of any race conditions.
+
+@item For @strong{efficiency}, we will be making sure that you only load executable code segments on demand (lazy loading).
+We will also be checking to make sure that you have made efficient use of the swap space and that your code is free of any memory leaks.
+
+@item For @strong{design quality}, we will be looking to see if you have implemented an advanced eviction algorithm
+(i.e. an algorithm that considers the properties of the pages in memory in order to chose a good eviction candidate).
+
+@item For @strong{general coding style}, we will be paying attention to all of the usual elements of good style 
+that you should be used to from last year (e.g. consistent code layout, appropriate use of comments, avoiding magic numbers, etc.)
+as well as your use of git (e.g. commit frequency and commit message quality).
+In this task, we will be paying particular attention to any additional efficiency improvements you have made to your eviction algorithm (e.g. encouraging fairness) or the system's overall use of memory (e.g. increased page sharing). 
+We will also be looking at any use of hash tables, specifically checking that your hash functions are chosen to avoid frequent collisions.
+@end itemize
 
 @end table
