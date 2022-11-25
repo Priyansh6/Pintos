@@ -124,7 +124,7 @@ get_args (void *esp, void *args[], int num_args)
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
-  return (uaddr) && is_user_vaddr (uaddr) && pagedir_get_page (thread_current ()->pagedir, uaddr);
+  return (uaddr) && is_user_vaddr (uaddr);
 }
 
 /* Every argument that the uses passes is a pointer - this function
@@ -259,6 +259,7 @@ open_handler (void *args[])
   }
 
   int fd = process_add_file (opened_file);
+  
   if (fd < 0) {
     file_close (opened_file);
     lock_release (&fs_lock);
@@ -337,8 +338,10 @@ write_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!is_valid_user_ptr ((char *) *buffer))
+  if (!is_valid_user_ptr ((char *) *buffer)) {
+    printf("died here\n");
     exit_failure ();
+  }
 
   switch (*fd) {
     case 0:
