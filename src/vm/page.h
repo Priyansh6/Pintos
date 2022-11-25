@@ -24,6 +24,7 @@ struct spt_entry {
 
 void free_spt_entry (struct hash_elem *elem, void *aux UNUSED);
 
+void handle_user_page_fault (void *fault_addr);
 bool load_page_from_filesys (struct spt_entry *entry);
 
 unsigned spt_hash_func (const struct hash_elem *elem, void *aux UNUSED);

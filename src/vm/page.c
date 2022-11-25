@@ -10,6 +10,32 @@
 #include "vm/frame.h"
 #include "vm/page.h"
 
+void handle_user_page_fault (void *fault_addr) {
+  struct hash spt = thread_current ()->spt;
+   
+  struct spt_entry spt_entry;
+  spt_entry.uaddr = pg_round_down (fault_addr);
+
+  struct hash_elem *found_elem = hash_find (&spt, &spt_entry.spt_hash_elem);
+  struct spt_entry *entry = found_elem == NULL ? NULL : hash_entry (found_elem, struct spt_entry, spt_hash_elem);
+
+  if (entry == NULL)
+    exit_failure ();
+    
+  switch (entry->entry_type) {
+    case SWAP:
+        break;
+    case FSYS:
+        if (!load_page_from_filesys (entry)) {
+          printf("Failed to load page from filesystem.\n");
+          exit_failure ();
+        }
+        break;
+    case ZEROPAGE:
+        break;
+  }
+}
+
 bool load_page_from_filesys (struct spt_entry *entry) {
     /* We can't be in an interrupt when we call this function since we try to acquire 
        fs_lock. If another process had already acquired the fs_lock then we would
@@ -52,8 +78,6 @@ bool load_page_from_filesys (struct spt_entry *entry) {
       lock_release (&fs_lock);
       return false; 
     }
-
-    // hex_dump (0, pagedir_get_page (t->pagedir, entry->uaddr), 4096, false);
 
     memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
  

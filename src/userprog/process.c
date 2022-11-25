@@ -766,49 +766,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       page->entry_type = FILESYS;
       page->file = file;
       page->ofs = ofs;
-      page->read_bytes = read_bytes;
-      page->zero_bytes = zero_bytes;
+      page->read_bytes = page_read_bytes;
+      page->zero_bytes = page_zero_bytes;
       page->writable = writable;
   
       hash_insert (&thread_current()->spt, &page->spt_hash_elem);
       
-      /* Check if virtual page already allocated */
-      // struct thread *t = thread_current ();
-      // uint8_t *kpage = pagedir_get_page (t->pagedir, upage);
-      
-      // if (kpage == NULL){
-        
-      //   /* Get a new page of memory. */
-      //   kpage = frame_table_get_frame (upage, PAL_USER);
-        
-      //   if (kpage == NULL)
-      //     return false;
-        
-      //   /* Add the page to the process's address space. */
-      //   if (!install_page (upage, kpage, writable)) 
-      //   {
-      //     frame_table_free_frame (kpage);
-      //     return false; 
-      //   }     
-        
-      // } else {
-        
-      //   /* Check if writable flag for the page should be updated */
-      //   if(writable && !pagedir_is_writable(t->pagedir, upage)){
-      //     pagedir_set_writable(t->pagedir, upage, writable); 
-      //   }
-        
-      // }
-
-      // /* Load data into the page. */
-      // if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes) {
-      //   return false; 
-      // }
-      // memset (kpage + page_read_bytes, 0, page_zero_bytes);
-      
-
       /* Advance. */
-      
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       ofs += page_read_bytes;
