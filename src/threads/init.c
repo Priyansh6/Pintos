@@ -12,6 +12,7 @@
 #include "devices/input.h"
 #include "devices/serial.h"
 #include "devices/shutdown.h"
+#include "devices/swap.h"
 #include "devices/timer.h"
 #include "devices/vga.h"
 #include "devices/rtc.h"
@@ -126,6 +127,10 @@ main (void)
   locate_block_devices ();
   filesys_init (format_filesys);
 #endif
+
+  #ifdef USERPROG
+    swap_init ();
+  #endif
 
   printf ("Boot complete.\n");
   

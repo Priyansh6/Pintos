@@ -338,10 +338,8 @@ write_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!is_valid_user_ptr ((char *) *buffer)) {
-    printf("died here\n");
+  if (!is_valid_user_ptr ((char *) *buffer))
     exit_failure ();
-  }
 
   switch (*fd) {
     case 0:
