@@ -760,18 +760,31 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
       
-      struct spt_entry *page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+      struct spt_entry query;
+      struct spt_entry *page;
+      struct hash_elem *e;
 
-      page->uaddr = upage;
-      page->entry_type = FILESYS;
-      page->file = file;
-      page->ofs = ofs;
+      query.uaddr = upage;
+      e = hash_find (&thread_current()->spt, &query.spt_hash_elem);
+      page = (e != NULL) ? hash_entry (e, struct spt_entry, spt_hash_elem) : NULL;
+
+      if (page == NULL) {
+        /* If we have a new entry to the spt, its writable status is set to the writable argument. */
+        page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+        page->writable = writable;
+        page->uaddr = upage;
+        page->entry_type = FILESYS;
+        page->file = file;
+        hash_insert (&thread_current()->spt, &page->spt_hash_elem);
+      } else {
+        /* Otherwise, writable is set to true if any segment in the page is writable. */
+        page->writable |= writable;
+      }
+
+            page->ofs = ofs;
       page->read_bytes = page_read_bytes;
       page->zero_bytes = page_zero_bytes;
-      page->writable = writable;
-  
-      hash_insert (&thread_current()->spt, &page->spt_hash_elem);
-      
+    
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
