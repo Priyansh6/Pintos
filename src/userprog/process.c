@@ -440,10 +440,6 @@ process_exit (void)
   if (parent_pcb == NULL || parent_pcb->has_exited)
     free (pcb);
 
-  /* Mark our process as having exited, so our parent and children know (needed when they exit to ensure
-     all PCBs are freed).*/
-  pcb->has_exited = true;
-
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
