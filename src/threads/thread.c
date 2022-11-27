@@ -12,8 +12,10 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
-#include <hash.h>
 #include "userprog/process.h"
+#endif
+#ifdef VM
+#include <hash.h>
 #include "vm/page.h"
 #endif
 
@@ -215,6 +217,9 @@ thread_create (const char *name, int priority,
     pcb_set_parent (t->pcb, process_get_pcb ());
   }
 
+  #endif
+
+  #ifdef VM
   hash_init (&t->spt, &spt_hash_func, &spt_less_func, NULL);
   #endif
 
