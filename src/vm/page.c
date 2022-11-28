@@ -16,6 +16,9 @@ bool load_zero_page (struct spt_entry *entry);
 void *get_and_install_page (struct spt_entry *entry);
 bool load_page_from_swap (struct spt_entry *entry);
 
+static void acquire_fs_lock (bool *should_release_lock);
+static void release_fs_lock (bool should_release_lock);
+
 /* If we encounter a page fault, we first want to check our supplemental page table
    to see if we are able to locate that memory (it may not have been loaded in yet, or 
    could be on our swap disk) and load it in if possible. Otherwise, we fail and exit the
@@ -73,28 +76,45 @@ bool
 load_page_from_filesys (struct spt_entry *entry) {
 
     ASSERT (!intr_context ())
+  
+    bool should_release_lock = true;
+    acquire_fs_lock (&should_release_lock);
 
-    lock_acquire (&fs_lock);
     file_seek (entry->file, entry->ofs);
     
     void *kpage = get_and_install_page (entry);
 
     if (kpage == NULL) {
-      lock_release (&fs_lock);
+      release_fs_lock (should_release_lock);
       return false; 
     }
 
     /* Load data into the page. */
     if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes) {
-      lock_release (&fs_lock);
+      release_fs_lock (should_release_lock);
       return false; 
     }
 
     /* Fills the rest of the page with zeros. */
     memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
  
-    lock_release (&fs_lock);
+    release_fs_lock (should_release_lock);
     return true;
+}
+
+static void
+acquire_fs_lock (bool *should_release_lock) {
+  if (lock_held_by_current_thread (&fs_lock)) {
+    *should_release_lock = false;
+  } else {
+    lock_acquire (&fs_lock);
+  }
+}
+
+static void
+release_fs_lock (bool should_release_lock) {
+  if (should_release_lock)
+    lock_release (&fs_lock);
 }
 
 /* Loads a page filled with zeros into physical memory. */
@@ -146,19 +166,19 @@ get_and_install_page (struct spt_entry *entry) {
 
 void 
 free_spt_entry (struct hash_elem *elem, void *aux UNUSED) {
-    free (hash_entry (elem, struct spt_entry, spt_hash_elem));
+  free (hash_entry (elem, struct spt_entry, spt_hash_elem));
 }
 
 unsigned 
 spt_hash_func (const struct hash_elem *elem, void *aux UNUSED) {
-    struct spt_entry *e = hash_entry (elem, struct spt_entry, spt_hash_elem);
-    return hash_int ((int) e->uaddr);
+  struct spt_entry *e = hash_entry (elem, struct spt_entry, spt_hash_elem);
+  return hash_int ((int) e->uaddr);
 }
 
 bool 
 spt_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED) {
-    struct spt_entry *spt_a = hash_entry (a, struct spt_entry, spt_hash_elem);
-    struct spt_entry *spt_b = hash_entry (b, struct spt_entry, spt_hash_elem);
+  struct spt_entry *spt_a = hash_entry (a, struct spt_entry, spt_hash_elem);
+  struct spt_entry *spt_b = hash_entry (b, struct spt_entry, spt_hash_elem);
 
-    return spt_a->uaddr < spt_b->uaddr;
+  return spt_a->uaddr < spt_b->uaddr;
 }
