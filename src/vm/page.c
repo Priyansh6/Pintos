@@ -75,31 +75,31 @@ load_page_from_swap (struct spt_entry *entry) {
 bool 
 load_page_from_filesys (struct spt_entry *entry) {
 
-    ASSERT (!intr_context ())
+  ASSERT (!intr_context ())
+
+  bool should_release_lock = true;
+  acquire_fs_lock (&should_release_lock);
+
+  file_seek (entry->file, entry->ofs);
   
-    bool should_release_lock = true;
-    acquire_fs_lock (&should_release_lock);
+  void *kpage = get_and_install_page (entry);
 
-    file_seek (entry->file, entry->ofs);
-    
-    void *kpage = get_and_install_page (entry);
-
-    if (kpage == NULL) {
-      release_fs_lock (should_release_lock);
-      return false; 
-    }
-
-    /* Load data into the page. */
-    if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes) {
-      release_fs_lock (should_release_lock);
-      return false; 
-    }
-
-    /* Fills the rest of the page with zeros. */
-    memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
- 
+  if (kpage == NULL) {
     release_fs_lock (should_release_lock);
-    return true;
+    return false; 
+  }
+
+  /* Load data into the page. */
+  if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes) {
+    release_fs_lock (should_release_lock);
+    return false; 
+  }
+
+  /* Fills the rest of the page with zeros. */
+  memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
+
+  release_fs_lock (should_release_lock);
+  return true;
 }
 
 static void
@@ -121,6 +121,7 @@ release_fs_lock (bool should_release_lock) {
 bool 
 load_zero_page (struct spt_entry *entry) {
   void *kpage = get_and_install_page (entry);
+  printf("testt\n");
 
   if (kpage == NULL)
     return false;

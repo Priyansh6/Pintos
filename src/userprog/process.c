@@ -768,20 +768,28 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       e = hash_find (&thread_current()->spt, &query.spt_hash_elem);
       page = (e != NULL) ? hash_entry (e, struct spt_entry, spt_hash_elem) : NULL;
 
+
       if (page == NULL) {
         /* If we have a new entry to the spt, its writable status is set to the writable argument. */
         page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+
         page->writable = writable;
         page->uaddr = upage;
-        page->entry_type = FILESYS;
+
+        if (page_zero_bytes == PGSIZE) {
+          page->entry_type = ZEROPAGE;
+        } else {
+          page->entry_type = FILESYS;
+        }
         page->file = file;
+
         hash_insert (&thread_current()->spt, &page->spt_hash_elem);
       } else {
         /* Otherwise, writable is set to true if any segment in the page is writable. */
         page->writable |= writable;
       }
 
-            page->ofs = ofs;
+      page->ofs = ofs;
       page->read_bytes = page_read_bytes;
       page->zero_bytes = page_zero_bytes;
     
