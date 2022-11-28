@@ -779,11 +779,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         if (page_zero_bytes == PGSIZE) {
           page->entry_type = ZEROPAGE;
         } else {
-          page->entry_type = FILESYS;
+          page->entry_type = FSYS;
+          page->file = file;
         }
-        page->file = file;
-
-        hash_insert (&thread_current()->spt, &page->spt_hash_elem);
+        
+        ASSERT (hash_insert (&thread_current()->spt, &page->spt_hash_elem) == NULL);
       } else {
         /* Otherwise, writable is set to true if any segment in the page is writable. */
         page->writable |= writable;

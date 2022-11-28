@@ -46,7 +46,7 @@ void handle_user_page_fault (void *fault_addr) {
         success = load_page_from_filesys (entry);
         break;
     case ZEROPAGE:
-        success = load_zero_page (entry->uaddr);
+        success = load_zero_page (entry);
         break;
   }
 
@@ -121,7 +121,6 @@ release_fs_lock (bool should_release_lock) {
 bool 
 load_zero_page (struct spt_entry *entry) {
   void *kpage = get_and_install_page (entry);
-  printf("testt\n");
 
   if (kpage == NULL)
     return false;
