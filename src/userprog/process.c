@@ -920,3 +920,14 @@ process_file_hash (const struct hash_elem *elem, void *aux UNUSED)
 
   return hash_int (pfile->fd);
 }
+
+/* Sets the mapped field of a pcb's process_file. */
+bool
+process_file_set_mapped (int fd, bool mapped) {
+  struct process_file *pfile = process_get_process_file (fd);
+  if (pfile == NULL)
+    return false;
+
+  pfile->mapped = mapped;
+  return true;
+}

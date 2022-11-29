@@ -25,5 +25,6 @@ int process_add_file (struct file* file);
 struct file *process_get_file (int fb);
 bool process_remove_file (int fd);
 void process_destroy_files (void);
+bool process_file_set_mapped (int fd, bool mapped);
 
 #endif /* userprog/process.h */
