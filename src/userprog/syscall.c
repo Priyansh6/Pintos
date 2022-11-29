@@ -424,7 +424,24 @@ close_handler (void *args[])
 static uint32_t
 mmap_handler (void *args[])
 {
- 
+  int *fd = args[0];
+  assert_fd_greater_than (*fd, 1);
+
+  void *addr = args[1];
+
+  /* Check addr is page aligned, doesn't overlap any 
+     existing set of mapped pages (including stack space 
+     or lazy loaded executables) and is not 0. */
+  struct spt_entry spt;
+  struct hash_elem *e;
+
+  spt.uaddr = addr;
+  e = hash_find (thread_current()->spt, &spt.spt_hash_elem);
+
+  if (pg_ofs(addr) != 0 || e != NULL || addr == 0)
+    exit_failure ();
+
+
 }
 
 static uint32_t
