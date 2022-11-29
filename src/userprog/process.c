@@ -72,6 +72,7 @@ struct process_control_block {
 struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
+  bool mapped;                    /* Removal and closing behaviour differs depending on whether a file is mapped. */
 
   struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
@@ -850,6 +851,7 @@ process_add_file (struct file* file)
   int assigned_fd = pcb->next_fd++;
   pfile->fd = assigned_fd;
   pfile->file = file;
+  pfile->mapped = false;
 
   if (hash_insert (&pcb->files, &pfile->hash_elem))
     return -1;
