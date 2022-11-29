@@ -2,11 +2,15 @@
 #include "filesys/file.h"
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/mmap.h"
 #include "vm/page.h"
 
-mapid_t mmap_create (int fd, void *uaddr) 
+static int pages_required (struct file *file);
+
+mapid_t 
+mmap_create (int fd, void *uaddr) 
 {
     /* Check that file mapped by fd has non-zero length
         and has already been opened by the process. */
@@ -18,8 +22,7 @@ mapid_t mmap_create (int fd, void *uaddr)
     if (uaddr == 0 || pg_ofs (uaddr) != 0)
         return -1;
 
-    /* Calculate number of pages required to mmap the file, rounding up. */
-    int n_pages = (file_length (file) + (PGSIZE - 1)) / PGSIZE;
+    int n_pages = pages_required (file);
 
     /* Check mmapped file doesn't overlap any existing set of mapped 
         pages (including lazy loaded executables). */
@@ -43,10 +46,14 @@ mapid_t mmap_create (int fd, void *uaddr)
     for (int i = 0; i < n_pages; i++) {
         struct spt_entry *page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
 
+        /* Set the file mapping in the pcb to be the first spt entry for the file. */
+        if (i == 0)
+            process_file_set_mapping (fd, page);
+
         page->writable = true; // this seems okay for now, maybe we will need to make this dependent on a file's deny_write field
         page->uaddr = uaddr + PGSIZE * i;
         page->entry_type = FSYS;
-        page->file = file;
+        page->file = file_reopen (file); // Not sure if we should just file reopen once (don't think we should)
         page->ofs = PGSIZE * i;
 
         uint32_t map_bytes = left_to_map < PGSIZE ? left_to_map : PGSIZE;
@@ -59,14 +66,64 @@ mapid_t mmap_create (int fd, void *uaddr)
     }
 
 
-    process_file_set_mapped (fd, true);
-
     return fd;
 }
 
-void mmap_unmap (mapid_t mapping) 
+/* Removes a file's mapping from its pcb. */
+void 
+mmap_unmap (mapid_t mapping) 
 {
     // Do we need to exit_failure() if the mapping doesn't exist?
     // If we do, maybe this needs to be done in the syscall handler before we call this function
-    process_file_set_mapped (mapping, false);
+    mmap_writeback (mapping);
+    process_file_set_mapping (mapping, NULL);
+}
+
+/* Writes any mmaped file data that has been changed back to the original file. */
+void 
+mmap_writeback (mapid_t mapping) 
+{
+    struct spt_entry *first = process_file_get_mapping (mapping);
+
+    int n_pages = pages_required (first->file);
+
+    void *uaddr = first->uaddr;
+
+    for (int i = 0; i < n_pages; i++) {
+        struct spt_entry spt;
+        spt.uaddr = uaddr;
+
+        struct hash_elem *e = hash_find (&thread_current ()->spt, &spt.spt_hash_elem);
+        struct spt_entry *page = hash_entry (e, struct spt_entry, spt_hash_elem);
+
+        /* Seek to offset within file. */
+        file_seek (page->file, page->ofs);   // not really sure if this is necessary tbh
+        
+        /* Allocate a temporary variable to store the modified file data. */
+        void *buf = malloc (PGSIZE);
+
+        /* If page has been written to, write its data back to the original file struct. */
+        if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr)) {
+            /* Read the modified file data into buf, before writing it to the original file struct. */
+            file_read_at (page->file, buf, PGSIZE, page->ofs);
+            file_write_at (process_get_file (mapping), buf, PGSIZE, page->ofs);
+        }
+
+        free (buf);
+
+        uaddr += PGSIZE;
+
+        /* Remove spt_entry from process's spt. */
+        hash_delete (&thread_current ()->spt, &page->spt_hash_elem);
+    }
+
+    /* File is no longer mapped. */
+    process_file_set_mapping (mapping, NULL);
+}
+
+/* Calculate number of pages required to mmap the file, rounding up. */
+static int 
+pages_required (struct file *file)
+{
+    return (file_length (file) + (PGSIZE - 1)) / PGSIZE;   
 }

@@ -4,6 +4,7 @@
 #include "filesys/file.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
+#include "vm/page.h"
 #include "hash.h"
 #include "list.h"
 
@@ -25,6 +26,7 @@ int process_add_file (struct file* file);
 struct file *process_get_file (int fb);
 bool process_remove_file (int fd);
 void process_destroy_files (void);
-bool process_file_set_mapped (int fd, bool mapped);
+bool process_file_set_mapping (int fd, const struct spt_entry *spt);
+struct spt_entry *process_file_get_mapping (int fd);
 
 #endif /* userprog/process.h */

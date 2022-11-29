@@ -72,7 +72,7 @@ struct process_control_block {
 struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
-  bool mapped;                    /* Removal and closing behaviour differs depending on whether a file is mapped. */
+  struct spt_entry *mapping;      /* Store a reference to the spt entry for an opened file if it is mapped. */
 
   struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
@@ -851,7 +851,7 @@ process_add_file (struct file* file)
   int assigned_fd = pcb->next_fd++;
   pfile->fd = assigned_fd;
   pfile->file = file;
-  pfile->mapped = false;
+  pfile->mapping = NULL;
 
   if (hash_insert (&pcb->files, &pfile->hash_elem))
     return -1;
@@ -921,13 +921,22 @@ process_file_hash (const struct hash_elem *elem, void *aux UNUSED)
   return hash_int (pfile->fd);
 }
 
-/* Sets the mapped field of a pcb's process_file. */
+/* Sets the mapping field of a pcb's process_file. */
 bool
-process_file_set_mapped (int fd, bool mapped) {
+process_file_set_mapping (int fd, const struct spt_entry *spt) {
   struct process_file *pfile = process_get_process_file (fd);
   if (pfile == NULL)
     return false;
 
-  pfile->mapped = mapped;
+  pfile->mapping = spt;
   return true;
+}
+
+struct spt_entry *
+process_file_get_mapping (int fd) {
+  struct process_file *pfile = process_get_process_file (fd);
+  if (pfile == NULL)
+    return NULL;
+
+  return pfile->mapping;
 }
