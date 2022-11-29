@@ -13,12 +13,12 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
 
     void *frame_addr = palloc_get_page (flags);
 
-    uintptr_t frame_number = frame_number_from_kaddr (frame_addr);
-  
     /* If we can't allocate any more pages, we need to choose a page to evict
        (and put it on the swap disk) to allow us to allocate another page. */
     if (frame_addr == NULL)
         PANIC ("aaaaah need to do eviction you fool\n");
+
+    uintptr_t frame_number = frame_number_from_kaddr (frame_addr);
 
     struct frame_table_entry *fte = (struct frame_table_entry *) malloc (sizeof (struct frame_table_entry));
     ASSERT (fte != NULL); // maybe need something stronger than an assert here

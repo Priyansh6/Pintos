@@ -28,7 +28,9 @@ struct spt_entry {
 void free_spt_entry (struct hash_elem *elem, void *aux UNUSED);
 
 void handle_user_page_fault (void *fault_addr);
+void stack_grow (void *fault_addr);
 
+struct spt_entry *get_spt_entry_by_uaddr (void *uaddr);
 unsigned spt_hash_func (const struct hash_elem *elem, void *aux UNUSED);
 bool spt_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 
