@@ -38,6 +38,9 @@
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
 #endif
+#ifdef VM
+#include "vm/frame.h"
+#endif
 
 /* Page directory with kernel mappings only. */
 uint32_t *init_page_dir;
@@ -99,6 +102,9 @@ main (void)
   palloc_init (user_page_limit);
   malloc_init ();
   paging_init ();
+  #ifdef VM
+  frame_table_init();
+  #endif
 
   /* Segmentation. */
 #ifdef USERPROG
@@ -141,6 +147,9 @@ main (void)
   #ifdef USERPROG
   process_destroy_files ();
   free (thread_current()->pcb);
+  #endif
+  #ifdef VM
+  free_frame_table ();
   #endif
   shutdown ();
   thread_exit ();
