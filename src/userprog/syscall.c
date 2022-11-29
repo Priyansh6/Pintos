@@ -13,6 +13,7 @@
 #include "hash.h"
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
+#include "vm/page.h"
 
 /* There are 13 syscalls in task two. */
 #define N_SYSCALLS 13
@@ -40,6 +41,8 @@ static uint32_t write_handler (void *args[]);
 static uint32_t seek_handler (void *args[]);
 static uint32_t tell_handler (void *args[]);
 static uint32_t close_handler (void *args[]);
+static uint32_t mmap_handler (void *args[]);
+static uint32_t munmap_handler (void *args[]);
 
 /* Map from system call number to the corresponding handler. We also
    provide the expected argument count (used to validate arguments later on). */
@@ -57,6 +60,8 @@ static const struct syscall syscall_ptrs[] = {
   {.handler = &seek_handler, .argc = 2},
   {.handler = &tell_handler, .argc = 1},
   {.handler = &close_handler, .argc = 1},
+  {.handler = &mmap_handler, .argc = 2},
+  {.handler = &munmap_handler, .argc = 1},
 };
 
 void
@@ -414,4 +419,16 @@ close_handler (void *args[])
 
   process_remove_file (*fd);
   return 0;
+}
+
+static uint32_t
+mmap_handler (void *args[])
+{
+ 
+}
+
+static uint32_t
+munmap_handler (void *args[])
+{
+
 }
