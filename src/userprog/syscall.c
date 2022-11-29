@@ -436,5 +436,7 @@ mmap_handler (void *args[])
 static uint32_t
 munmap_handler (void *args[])
 {
-
+  int *mapping = args[0];
+  mmap_unmap (*mapping);
+  return 0;
 }
