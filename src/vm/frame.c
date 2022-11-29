@@ -9,7 +9,6 @@ static uintptr_t frame_number_from_kaddr (void *kaddr);
 void *
 frame_table_get_frame (void *upage, enum palloc_flags flags)
 {
-
     ASSERT (flags & PAL_USER);
 
     void *frame_addr = palloc_get_page (flags);

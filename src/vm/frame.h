@@ -12,6 +12,7 @@ struct frame_table_entry {
     void *upage;
 };
 
+/* This might be a bad idea to not malloc as it will go on the kernel stack space */
 struct frame_table_entry *frame_table[N_FRAMES];
 
 void *frame_table_get_frame (void *upage, enum palloc_flags flags);

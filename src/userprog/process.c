@@ -22,6 +22,7 @@
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
 #define PUSH_STACK(type, pointer, value) pointer = ((type*) pointer) - 1; (*((type*) pointer) = (type) (value))
@@ -444,6 +445,9 @@ process_exit (void)
      all PCBs are freed).*/
   pcb->has_exited = true;
 
+  /* Destroy the current process's supplemental page table and free all entries. */
+  hash_destroy (&thread_current()->spt, &free_spt_entry);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -756,43 +760,43 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
       
-      /* Check if virtual page already allocated */
-      struct thread *t = thread_current ();
-      uint8_t *kpage = pagedir_get_page (t->pagedir, upage);
-      
-      if (kpage == NULL){
-        
-        /* Get a new page of memory. */
-        kpage = frame_table_get_frame (upage, PAL_USER);
-        
-        if (kpage == NULL)
-          return false;
-        
-        /* Add the page to the process's address space. */
-        if (!install_page (upage, kpage, writable)) 
-        {
-          frame_table_free_frame (kpage);
-          return false; 
-        }     
-        
-      } else {
-        
-        /* Check if writable flag for the page should be updated */
-        if(writable && !pagedir_is_writable(t->pagedir, upage)){
-          pagedir_set_writable(t->pagedir, upage, writable); 
+      struct spt_entry query;
+      struct spt_entry *page;
+      struct hash_elem *e;
+
+      query.uaddr = upage;
+      e = hash_find (&thread_current()->spt, &query.spt_hash_elem);
+      page = (e != NULL) ? hash_entry (e, struct spt_entry, spt_hash_elem) : NULL;
+
+
+      if (page == NULL) {
+        /* If we have a new entry to the spt, its writable status is set to the writable argument. */
+        page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+
+        page->writable = writable;
+        page->uaddr = upage;
+
+        if (page_zero_bytes == PGSIZE) {
+          page->entry_type = ZEROPAGE;
+        } else {
+          page->entry_type = FSYS;
+          page->file = file;
         }
         
+        ASSERT (hash_insert (&thread_current()->spt, &page->spt_hash_elem) == NULL);
+      } else {
+        /* Otherwise, writable is set to true if any segment in the page is writable. */
+        page->writable |= writable;
       }
 
-      /* Load data into the page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes) {
-        return false; 
-      }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
+      page->ofs = ofs;
+      page->read_bytes = page_read_bytes;
+      page->zero_bytes = page_zero_bytes;
+    
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;
