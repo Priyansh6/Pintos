@@ -99,17 +99,9 @@ mmap_writeback (mapid_t mapping)
         /* Seek to offset within file. */
         file_seek (page->file, page->ofs);   // not really sure if this is necessary tbh
         
-        /* Allocate a temporary variable to store the modified file data. */
-        void *buf = malloc (PGSIZE);
-
         /* If page has been written to, write its data back to the original file struct. */
-        if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr)) {
-            /* Read the modified file data into buf, before writing it to the original file struct. */
-            file_read_at (page->file, buf, PGSIZE, page->ofs);
-            file_write_at (process_get_file (mapping), buf, PGSIZE, page->ofs);
-        }
-
-        free (buf);
+        if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr))
+            file_write_at (page->file, page->uaddr, PGSIZE, page->ofs);
 
         uaddr += PGSIZE;
 
