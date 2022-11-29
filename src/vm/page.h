@@ -5,6 +5,8 @@
 #include "filesys/file.h"
 #include "filesys/off_t.h"
 
+#define MAX_USER_STACK_SIZE 0x400000
+
 enum spt_entry_type {SWAP, FSYS, ZEROPAGE};
 
 struct spt_entry {
