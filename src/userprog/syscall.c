@@ -429,6 +429,12 @@ mmap_handler (void *args[])
 
   void *addr = args[1];
 
+  /* Check that file mapped by fd has non-zero length
+     and has already been opened by the process. */
+  struct file *file = process_get_file (*fd);
+  if (file == NULL || file_length (file) == 0)
+    exit_failure ();
+
   /* Check addr is page aligned, doesn't overlap any 
      existing set of mapped pages (including stack space 
      or lazy loaded executables) and is not 0. */
@@ -436,7 +442,7 @@ mmap_handler (void *args[])
   struct hash_elem *e;
 
   spt.uaddr = addr;
-  e = hash_find (thread_current()->spt, &spt.spt_hash_elem);
+  e = hash_find (&thread_current ()->spt, &spt.spt_hash_elem);
 
   if (pg_ofs(addr) != 0 || e != NULL || addr == 0)
     exit_failure ();
