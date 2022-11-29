@@ -1,4 +1,4 @@
-/* Wait for a process that will be killed for bad behavior. */
+/* Wait for a process that will be killed for bad behavior, ensuring it loaded correctly. */
 
 #include <syscall.h>
 #include "tests/lib.h"

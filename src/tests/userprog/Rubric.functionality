@@ -36,7 +36,9 @@ Functionality of system calls:
 
 - Test "wait" system call.
 5	wait-simple
+5	wait-killed
 5	wait-twice
+5	wait-bad-child
 
 - Test "exit" system call.
 5	exit
