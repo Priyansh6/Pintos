@@ -102,6 +102,14 @@ load_page_from_filesys (struct spt_entry *entry) {
   return true;
 }
 
+/* Acquires the filesystem lock if we do not already hold it. 
+   
+   If we have already acquired the lock, then we keep track
+   of this in the should_release_lock variable which is used
+   later to determine when we should release the lock (i.e if
+   we had already acquired it before calling this function, we 
+   don't want to release it ourselves as our caller will do it 
+   for us).*/
 static void
 acquire_fs_lock (bool *should_release_lock) {
   if (lock_held_by_current_thread (&fs_lock)) {
@@ -111,6 +119,8 @@ acquire_fs_lock (bool *should_release_lock) {
   }
 }
 
+/* Releases the file system lock if we were not holding it
+   before we loaded a page from the filesystem.  */
 static void
 release_fs_lock (bool should_release_lock) {
   if (should_release_lock)
@@ -164,6 +174,7 @@ get_and_install_page (struct spt_entry *entry) {
   return kpage;
 }
 
+/* Frees the given elem hash table entry. */
 void 
 free_spt_entry (struct hash_elem *elem, void *aux UNUSED) {
   free (hash_entry (elem, struct spt_entry, spt_hash_elem));
