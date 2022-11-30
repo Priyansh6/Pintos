@@ -42,6 +42,7 @@ void handle_user_page_fault (void *fault_addr) {
     case SWAP:
         success = load_page_from_swap (entry);
         break;
+    case MMAP:
     case FSYS:
         success = load_page_from_filesys (entry);
         break;
@@ -56,7 +57,8 @@ void handle_user_page_fault (void *fault_addr) {
   }
 
   /* Remove the entry from the supplemental page table because it is now stored in memory. */
-  hash_delete (&spt, found_elem);
+  if (entry->entry_type != MMAP)
+    hash_delete (&spt, found_elem);
 
 }
 

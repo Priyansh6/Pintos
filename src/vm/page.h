@@ -7,7 +7,7 @@
 
 #define MAX_USER_STACK_SIZE 0x400000
 
-enum spt_entry_type {SWAP, FSYS, ZEROPAGE};
+enum spt_entry_type {SWAP, FSYS, ZEROPAGE, MMAP};
 
 struct spt_entry {
     void *uaddr;                    /* Address in user virtual space of page. */

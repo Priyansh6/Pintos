@@ -22,6 +22,7 @@
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
 #include "vm/frame.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
@@ -72,7 +73,7 @@ struct process_control_block {
 struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
-  struct spt_entry *mapping;      /* Store a reference to the spt entry for an opened file if it is mapped. */
+  struct spt_entry *mapping;      /* Store a reference to the first spt entry for an opened file if it is mapped. */
 
   struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
@@ -157,6 +158,11 @@ static void
 process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
 {
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
+
+  /* Write back any changes to mapped files. */
+  if (pfile->mapping != NULL)
+    mmap_writeback (pfile->fd);
+
   file_close (pfile->file);
   free (pfile);
 }
@@ -923,7 +929,7 @@ process_file_hash (const struct hash_elem *elem, void *aux UNUSED)
 
 /* Sets the mapping field of a pcb's process_file. */
 bool
-process_file_set_mapping (int fd, const struct spt_entry *spt) {
+process_file_set_mapping (int fd, struct spt_entry *spt) {
   struct process_file *pfile = process_get_process_file (fd);
   if (pfile == NULL)
     return false;

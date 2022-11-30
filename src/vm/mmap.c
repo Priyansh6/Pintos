@@ -52,7 +52,7 @@ mmap_create (int fd, void *uaddr)
 
         page->writable = true; // this seems okay for now, maybe we will need to make this dependent on a file's deny_write field
         page->uaddr = uaddr + PGSIZE * i;
-        page->entry_type = FSYS;
+        page->entry_type = MMAP;
         page->file = file_reopen (file); // Not sure if we should just file reopen once (don't think we should)
         page->ofs = PGSIZE * i;
 
@@ -64,7 +64,6 @@ mmap_create (int fd, void *uaddr)
 
         left_to_map -= map_bytes;
     }
-
 
     return fd;
 }
@@ -96,12 +95,11 @@ mmap_writeback (mapid_t mapping)
         struct hash_elem *e = hash_find (&thread_current ()->spt, &spt.spt_hash_elem);
         struct spt_entry *page = hash_entry (e, struct spt_entry, spt_hash_elem);
 
-        /* Seek to offset within file. */
-        file_seek (page->file, page->ofs);   // not really sure if this is necessary tbh
-        
         /* If page has been written to, write its data back to the original file struct. */
         if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr))
             file_write_at (page->file, page->uaddr, PGSIZE, page->ofs);
+
+        file_close (page->file);
 
         uaddr += PGSIZE;
 
