@@ -13,6 +13,7 @@
 #include "hash.h"
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
+#include "vm/page.h"
 
 /* There are 13 syscalls in task two. */
 #define N_SYSCALLS 13
@@ -86,7 +87,7 @@ syscall_handler (struct intr_frame *f)
        
        If any of the arguments fail validation, we exit the user program. */
     validate_args (args, syscall.argc);
-    
+
     /* Make call to corresponding system call handler and put the return value 
        in the eax register. It's okay to do this even when we don't expect a return
        value because nothing else will inspect/require the contents of the eax register. */
@@ -124,7 +125,7 @@ get_args (void *esp, void *args[], int num_args)
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
-  return (uaddr) && is_user_vaddr (uaddr);
+  return (uaddr) && is_user_vaddr (uaddr) && !get_spt_entry_by_uaddr (uaddr);
 }
 
 /* Every argument that the uses passes is a pointer - this function

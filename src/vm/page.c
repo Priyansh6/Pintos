@@ -24,13 +24,7 @@ static void release_fs_lock (bool should_release_lock);
    could be on our swap disk) and load it in if possible. Otherwise, we fail and exit the
    user process. */
 void handle_user_page_fault (void *fault_addr) {
-  struct hash spt = thread_current ()->spt;
-   
-  struct spt_entry spt_entry;
-  spt_entry.uaddr = pg_round_down (fault_addr);
-
-  struct hash_elem *found_elem = hash_find (&spt, &spt_entry.spt_hash_elem);
-  struct spt_entry *entry = found_elem == NULL ? NULL : hash_entry (found_elem, struct spt_entry, spt_hash_elem);
+  struct spt_entry *entry = get_spt_entry_by_uaddr (pg_round_down (fault_addr));
 
   /* If we don't know how to locate the page, fail. */
   if (entry == NULL)
@@ -56,7 +50,7 @@ void handle_user_page_fault (void *fault_addr) {
   }
 
   /* Remove the entry from the supplemental page table because it is now stored in memory. */
-  hash_delete (&spt, found_elem);
+  hash_delete (&thread_current ()->spt, &entry->spt_hash_elem);
 
 }
 
@@ -172,6 +166,36 @@ get_and_install_page (struct spt_entry *entry) {
   }
 
   return kpage;
+}
+
+/* Grows the current process user stack by one page. Called only from a page fault when
+   we determine that accessing the fault_addr is likely to be a stack access, in which case,
+   up to STACK_LIMIT, we want to grow the stack. */
+void
+stack_grow (void *fault_addr) {
+  void *kpage = frame_table_get_frame (((uint8_t *) PHYS_BASE) - PGSIZE, PAL_USER | PAL_ZERO);
+  void *upage = pg_round_down (fault_addr);
+  struct thread *t = thread_current ();
+
+  if (kpage != NULL) {
+      if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true))
+        return;
+      else
+        exit_failure ();
+  } else {
+      exit_failure ();
+  }
+}
+
+/* Returns the supplemental page table entry given by uaddr. */
+struct spt_entry *
+get_spt_entry_by_uaddr (void *uaddr)
+{
+  struct spt_entry spt_entry;
+  spt_entry.uaddr = uaddr;
+  struct hash_elem *found_elem = hash_find (&thread_current()->spt, &spt_entry.spt_hash_elem);
+
+  return found_elem == NULL ? NULL : hash_entry (found_elem, struct spt_entry, spt_hash_elem);
 }
 
 /* Frees the given elem hash table entry. */
