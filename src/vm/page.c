@@ -57,8 +57,8 @@ void handle_user_page_fault (void *fault_addr) {
   }
 
   /* Remove the entry from the supplemental page table because it is now stored in memory. */
-  if (entry->entry_type != MMAP)
-    hash_delete (&spt, found_elem);
+//  if (entry->entry_type != MMAP)
+//    hash_delete (&spt, found_elem);
 
 }
 
