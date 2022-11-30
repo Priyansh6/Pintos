@@ -40,7 +40,7 @@ frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUS
     return fte_a->frame_no < fte_b->frame_no;
 }
 
-/* Auxilliary function for freeing frame table. */
+/* Auxilliary function for freeing frame table at shutdown. */
 void
 free_frame_elem (struct hash_elem *e, void *aux UNUSED)
 {
