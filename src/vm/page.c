@@ -16,9 +16,6 @@ bool load_zero_page (struct spt_entry *entry);
 void *get_and_install_page (struct spt_entry *entry);
 bool load_page_from_swap (struct spt_entry *entry);
 
-static void acquire_fs_lock (bool *should_release_lock);
-static void release_fs_lock (bool should_release_lock);
-
 /* If we encounter a page fault, we first want to check our supplemental page table
    to see if we are able to locate that memory (it may not have been loaded in yet, or 
    could be on our swap disk) and load it in if possible. Otherwise, we fail and exit the
@@ -36,6 +33,7 @@ void handle_user_page_fault (void *fault_addr) {
     case SWAP:
         success = load_page_from_swap (entry);
         break;
+    case MMAP:
     case FSYS:
         success = load_page_from_filesys (entry);
         break;
@@ -49,9 +47,8 @@ void handle_user_page_fault (void *fault_addr) {
     PANIC ("Failed to load page from filesystem.\n");
   }
 
-  /* Remove the entry from the supplemental page table because it is now stored in memory. */
-  hash_delete (&thread_current ()->spt, &entry->spt_hash_elem);
-
+//  if (entry->entry_type != MMAP)
+//    hash_delete (&spt, found_elem);
 }
 
 /* Loads a page in from swap into user address entry->uaddr. */
@@ -62,7 +59,7 @@ load_page_from_swap (struct spt_entry *entry) {
 }
 
 /* Loads a file into a newly allocated page.
-
+   OM WAS HERE
    We can't be in an interrupt when we call this function since we try to acquire 
    fs_lock. If another process had already acquired the fs_lock then we would
    deadlock. */
@@ -71,28 +68,27 @@ load_page_from_filesys (struct spt_entry *entry) {
 
   ASSERT (!intr_context ())
 
-  bool should_release_lock = true;
-  acquire_fs_lock (&should_release_lock);
+  bool should_release_lock = safe_acquire_fs_lock ();
 
   file_seek (entry->file, entry->ofs);
   
   void *kpage = get_and_install_page (entry);
 
   if (kpage == NULL) {
-    release_fs_lock (should_release_lock);
+    safe_release_fs_lock (should_release_lock);
     return false; 
   }
 
   /* Load data into the page. */
   if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes) {
-    release_fs_lock (should_release_lock);
+    safe_release_fs_lock (should_release_lock);
     return false; 
   }
 
   /* Fills the rest of the page with zeros. */
   memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
 
-  release_fs_lock (should_release_lock);
+  safe_release_fs_lock (should_release_lock);
   return true;
 }
 
@@ -159,7 +155,7 @@ get_and_install_page (struct spt_entry *entry) {
       return NULL; 
     }     
   } else {
-    /* Check if writable flag for the page should be updated */
+    /* Check if writable flag for the page should be updated OM WAS HERE */
     if(entry->writable && !pagedir_is_writable(t->pagedir, entry->uaddr)){
       pagedir_set_writable(t->pagedir, entry->uaddr, entry->writable); 
     }

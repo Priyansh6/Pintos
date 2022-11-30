@@ -22,6 +22,7 @@
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
 #include "vm/frame.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
@@ -72,6 +73,7 @@ struct process_control_block {
 struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
+  struct spt_entry *mapping;      /* Store a reference to the first spt entry for an opened file if it is mapped. */
 
   struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
@@ -144,11 +146,15 @@ pcb_get_child_by_tid (tid_t child_tid) {
 static void
 process_file_close (struct process_control_block *pcb, struct process_file *pfile)
 {
-  hash_delete (&pcb->files, &pfile->hash_elem);
+  if (pfile->mapping == NULL) 
+    hash_delete (&pcb->files, &pfile->hash_elem);
+
   lock_acquire (&fs_lock);
   file_close (pfile->file);
   lock_release (&fs_lock);
-  free (pfile);
+
+  if (pfile->mapping == NULL)
+    free (pfile);
 }
 
 /* Executes process_file_close on process_file associated with hash_elem e */
@@ -156,6 +162,11 @@ static void
 process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
 {
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
+
+  /* Write back any changes to mapped files. */
+  if (pfile->mapping != NULL)
+    mmap_writeback (pfile);
+
   file_close (pfile->file);
   free (pfile);
 }
@@ -850,6 +861,7 @@ process_add_file (struct file* file)
   int assigned_fd = pcb->next_fd++;
   pfile->fd = assigned_fd;
   pfile->file = file;
+  pfile->mapping = NULL;
 
   if (hash_insert (&pcb->files, &pfile->hash_elem))
     return -1;
@@ -859,7 +871,7 @@ process_add_file (struct file* file)
 
 /* Returns process_file struct associated with file descriptor fd in the current process's pcb or
    NULL if no file could be found. */
-static struct process_file *
+struct process_file *
 process_get_process_file (int fd)
 {
   struct process_control_block *pcb = process_get_pcb ();
@@ -917,4 +929,22 @@ process_file_hash (const struct hash_elem *elem, void *aux UNUSED)
   const struct process_file *pfile = hash_entry (elem, struct process_file, hash_elem);
 
   return hash_int (pfile->fd);
+}
+
+/* Sets the mapping field of a pcb's process_file. */
+bool
+process_file_set_mapping (struct process_file *pfile, struct spt_entry *spt) {
+  if (pfile == NULL)
+    return false;
+
+  pfile->mapping = spt;
+  return true;
+}
+
+struct spt_entry *
+process_file_get_mapping (struct process_file *pfile) {
+  if (pfile == NULL)
+    return NULL;
+
+  return pfile->mapping;
 }

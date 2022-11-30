@@ -13,10 +13,11 @@
 #include "hash.h"
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 
-/* There are 13 syscalls in task two. */
-#define N_SYSCALLS 13
+/* There are 15 syscalls in tasks two and three. */
+#define N_SYSCALLS 15
 #define MAX_CONSOLE_BUFFER_OUTPUT 250
 #define MIN(x, y) ((x <= y) ? x : y)
 
@@ -41,6 +42,8 @@ static uint32_t write_handler (void *args[]);
 static uint32_t seek_handler (void *args[]);
 static uint32_t tell_handler (void *args[]);
 static uint32_t close_handler (void *args[]);
+static uint32_t mmap_handler (void *args[]);
+static uint32_t munmap_handler (void *args[]);
 
 /* Map from system call number to the corresponding handler. We also
    provide the expected argument count (used to validate arguments later on). */
@@ -58,6 +61,8 @@ static const struct syscall syscall_ptrs[] = {
   {.handler = &seek_handler, .argc = 2},
   {.handler = &tell_handler, .argc = 1},
   {.handler = &close_handler, .argc = 1},
+  {.handler = &mmap_handler, .argc = 2},
+  {.handler = &munmap_handler, .argc = 1},
 };
 
 void
@@ -415,4 +420,38 @@ close_handler (void *args[])
 
   process_remove_file (*fd);
   return 0;
+}
+
+static uint32_t
+mmap_handler (void *args[])
+{
+  int *fd = args[0];
+  assert_fd_greater_than (*fd, 1);
+
+  uint32_t *addr = args[1];
+
+  return (uint32_t) mmap_create (*fd, (void *) *addr);
+}
+
+static uint32_t
+munmap_handler (void *args[])
+{
+  int *mapping = args[0];
+  mmap_unmap (*mapping);
+  return 0;
+}
+
+bool
+safe_acquire_fs_lock (void) {
+  if (lock_held_by_current_thread (&fs_lock)) 
+    return false;
+  
+  lock_acquire (&fs_lock);
+  return true;
+}
+
+void
+safe_release_fs_lock (bool should_release_lock) {
+  if (should_release_lock)
+    lock_release (&fs_lock);
 }
