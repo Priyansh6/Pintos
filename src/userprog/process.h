@@ -8,6 +8,7 @@
 #include "hash.h"
 #include "list.h"
 
+struct process_file;
 struct process_control_block;
 
 void init_process (void);
@@ -26,7 +27,10 @@ int process_add_file (struct file* file);
 struct file *process_get_file (int fb);
 bool process_remove_file (int fd);
 void process_destroy_files (void);
-bool process_file_set_mapping (int fd, struct spt_entry *spt);
-struct spt_entry *process_file_get_mapping (int fd);
+
+bool process_file_set_mapping (struct process_file *pfile, struct spt_entry *spt);
+struct spt_entry *process_file_get_mapping (struct process_file *pfile);
+
+struct process_file *process_get_process_file(int fd);
 
 #endif /* userprog/process.h */

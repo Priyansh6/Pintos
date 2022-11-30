@@ -1,13 +1,15 @@
 #include "hash.h"
+#include <stdio.h>
 #include "filesys/file.h"
 #include "threads/malloc.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "userprog/syscall.h"
 #include "vm/mmap.h"
 #include "vm/page.h"
 
-static int pages_required (struct file *file);
+static int pages_required(struct file *file);
 
 mapid_t 
 mmap_create (int fd, void *uaddr) 
@@ -47,8 +49,10 @@ mmap_create (int fd, void *uaddr)
         struct spt_entry *page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
 
         /* Set the file mapping in the pcb to be the first spt entry for the file. */
-        if (i == 0)
-            process_file_set_mapping (fd, page);
+        if (i == 0) {
+            struct process_file *pfile = process_get_process_file (fd);
+            process_file_set_mapping (pfile, page);
+        }
 
         page->writable = true; // this seems okay for now, maybe we will need to make this dependent on a file's deny_write field
         page->uaddr = uaddr + PGSIZE * i;
@@ -70,19 +74,24 @@ mmap_create (int fd, void *uaddr)
 
 /* Removes a file's mapping from its pcb. */
 void 
-mmap_unmap (mapid_t mapping) 
+mmap_unmap(mapid_t mapping)
 {
     // Do we need to exit_failure() if the mapping doesn't exist?
     // If we do, maybe this needs to be done in the syscall handler before we call this function
-    mmap_writeback (mapping);
-    process_file_set_mapping (mapping, NULL);
+    struct process_file *pfile = process_get_process_file(mapping);
+    mmap_writeback(pfile);
+    process_file_set_mapping(pfile, NULL);
 }
 
 /* Writes any mmaped file data that has been changed back to the original file. */
 void 
-mmap_writeback (mapid_t mapping) 
+mmap_writeback(struct process_file *pfile)
 {
-    struct spt_entry *first = process_file_get_mapping (mapping);
+
+    struct spt_entry *first = process_file_get_mapping (pfile);
+
+    if (first == NULL)
+        return;
 
     int n_pages = pages_required (first->file);
 
@@ -96,10 +105,12 @@ mmap_writeback (mapid_t mapping)
         struct spt_entry *page = hash_entry (e, struct spt_entry, spt_hash_elem);
 
         /* If page has been written to, write its data back to the original file struct. */
-        if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr))
+        if (pagedir_is_dirty(thread_current()->pagedir, page->uaddr))
+        {
+            bool should_release_lock = safe_acquire_fs_lock ();
             file_write_at (page->file, page->uaddr, PGSIZE, page->ofs);
-
-        file_close (page->file);
+            safe_release_fs_lock (should_release_lock);
+        }
 
         uaddr += PGSIZE;
 
@@ -108,7 +119,7 @@ mmap_writeback (mapid_t mapping)
     }
 
     /* File is no longer mapped. */
-    process_file_set_mapping (mapping, NULL);
+    process_file_set_mapping(pfile, NULL);
 }
 
 /* Calculate number of pages required to mmap the file, rounding up. */

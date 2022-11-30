@@ -165,7 +165,7 @@ process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
 
   /* Write back any changes to mapped files. */
   if (pfile->mapping != NULL)
-    mmap_writeback (pfile->fd);
+    mmap_writeback (pfile);
 
   file_close (pfile->file);
   free (pfile);
@@ -871,7 +871,7 @@ process_add_file (struct file* file)
 
 /* Returns process_file struct associated with file descriptor fd in the current process's pcb or
    NULL if no file could be found. */
-static struct process_file *
+struct process_file *
 process_get_process_file (int fd)
 {
   struct process_control_block *pcb = process_get_pcb ();
@@ -933,8 +933,7 @@ process_file_hash (const struct hash_elem *elem, void *aux UNUSED)
 
 /* Sets the mapping field of a pcb's process_file. */
 bool
-process_file_set_mapping (int fd, struct spt_entry *spt) {
-  struct process_file *pfile = process_get_process_file (fd);
+process_file_set_mapping (struct process_file *pfile, struct spt_entry *spt) {
   if (pfile == NULL)
     return false;
 
@@ -943,8 +942,7 @@ process_file_set_mapping (int fd, struct spt_entry *spt) {
 }
 
 struct spt_entry *
-process_file_get_mapping (int fd) {
-  struct process_file *pfile = process_get_process_file (fd);
+process_file_get_mapping (struct process_file *pfile) {
   if (pfile == NULL)
     return NULL;
 

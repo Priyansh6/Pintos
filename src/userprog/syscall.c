@@ -440,3 +440,18 @@ munmap_handler (void *args[])
   mmap_unmap (*mapping);
   return 0;
 }
+
+bool
+safe_acquire_fs_lock (void) {
+  if (lock_held_by_current_thread (&fs_lock)) 
+    return false;
+  
+  lock_acquire (&fs_lock);
+  return true;
+}
+
+void
+safe_release_fs_lock (bool should_release_lock) {
+  if (should_release_lock)
+    lock_release (&fs_lock);
+}
