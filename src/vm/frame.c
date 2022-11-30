@@ -2,6 +2,7 @@
 #include "frame.h"
 #include "threads/malloc.h"
 #include "hash.h"
+#include "threads/synch.h"
 
 static struct frame_table *frame_table;
 static uintptr_t frame_number_from_kaddr (void *kaddr);
@@ -14,9 +15,12 @@ void
 frame_table_init (void)
 {
     frame_table = (struct frame_table *) malloc (sizeof (struct frame_table));
+    ASSERT (frame_table != NULL);
+
     frame_table->max_frames = N_FRAMES;
     frame_table->num_frames = 0;
     hash_init(&frame_table->ft, frame_hash_func, frame_less, NULL);
+    lock_init(&frame_table->ft_lock);
 }
 
 /* Function for hasing the frame_no of a frame_table_enrty. */
@@ -59,6 +63,9 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
 {
     ASSERT (flags & PAL_USER);
 
+    lock_acquire (&frame_table->ft_lock);
+
+    /* Attempting to allocate a page from memory. */
     void *frame_addr = palloc_get_page (flags);
   
     /* If we can't allocate any more pages, we need to choose a page to evict
@@ -66,15 +73,18 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
     if (frame_addr == NULL || frame_table->num_frames >= frame_table->max_frames)
         PANIC ("aaaaah need to do eviction you fool\n");
 
+    /* Creating new frame table entry on the heap. */
     struct frame_table_entry *fte = (struct frame_table_entry *) malloc (sizeof (struct frame_table_entry));
-    ASSERT (fte != NULL); // maybe need something stronger than an assert here
+    ASSERT (fte != NULL);
 
+    /* Inserting new page into frame table. */
     fte->upage = upage;
     fte->frame_no = frame_number_from_kaddr (frame_addr);
-    hash_insert(&frame_table->ft, &fte->frame_hash_elem);
+    hash_insert (&frame_table->ft, &fte->frame_hash_elem);
 
     frame_table->num_frames++;
 
+    lock_release (&frame_table->ft_lock);
     return frame_addr;
 }
 
@@ -86,15 +96,22 @@ frame_table_free_frame (void *kaddr)
     struct hash_elem *e;
     struct frame_table_entry *fte;
 
-    query.frame_no = frame_number_from_kaddr(kaddr);
-    e = hash_find(&frame_table->ft, &query.frame_hash_elem);
-    fte = hash_entry(e, struct frame_table_entry, frame_hash_elem);
+    /* Locating the frame to be freed in the frame table. */
+    query.frame_no = frame_number_from_kaddr (kaddr);
+    e = hash_find (&frame_table->ft, &query.frame_hash_elem);
+    fte = hash_entry (e, struct frame_table_entry, frame_hash_elem);
 
+    lock_acquire (&frame_table->ft_lock);
+
+    /* Freeing page from memory. */
     palloc_free_page (ptov (fte->frame_no));
 
-    hash_delete(&frame_table->ft, e);
+    /* Removing page and freeing frame from frame table. */
+    hash_delete (&frame_table->ft, e);
     frame_table->num_frames--;
     free (fte);
+
+    lock_release (&frame_table->ft_lock);
 }
 
 /* Converts a kernel virtual address to a frame number by calling vtop and
