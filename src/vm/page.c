@@ -43,12 +43,9 @@ void handle_user_page_fault (void *fault_addr) {
   }
 
   /* We should always succeed, so PANIC the kernel if we ever don't. */
-  if (!success) {
+  if (!success)
     PANIC ("Failed to load page from filesystem.\n");
-  }
 
-//  if (entry->entry_type != MMAP)
-//    hash_delete (&spt, found_elem);
 }
 
 /* Loads a page in from swap into user address entry->uaddr. */
@@ -90,31 +87,6 @@ load_page_from_filesys (struct spt_entry *entry) {
 
   safe_release_fs_lock (should_release_lock);
   return true;
-}
-
-/* Acquires the filesystem lock if we do not already hold it. 
-   
-   If we have already acquired the lock, then we keep track
-   of this in the should_release_lock variable which is used
-   later to determine when we should release the lock (i.e if
-   we had already acquired it before calling this function, we 
-   don't want to release it ourselves as our caller will do it 
-   for us).*/
-static void
-acquire_fs_lock (bool *should_release_lock) {
-  if (lock_held_by_current_thread (&fs_lock)) {
-    *should_release_lock = false;
-  } else {
-    lock_acquire (&fs_lock);
-  }
-}
-
-/* Releases the file system lock if we were not holding it
-   before we loaded a page from the filesystem.  */
-static void
-release_fs_lock (bool should_release_lock) {
-  if (should_release_lock)
-    lock_release (&fs_lock);
 }
 
 /* Loads a page filled with zeros into physical memory. */

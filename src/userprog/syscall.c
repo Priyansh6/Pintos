@@ -23,6 +23,7 @@
 
 static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
+static bool is_writable_page (void *uaddr);
 static void get_args (void *esp, void *args[], int num_args);
 static void validate_args (void *args[], int argc);
 
@@ -130,7 +131,14 @@ get_args (void *esp, void *args[], int num_args)
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
-  return (uaddr) && is_user_vaddr (uaddr) && !get_spt_entry_by_uaddr (uaddr);
+  return (uaddr) && is_user_vaddr (uaddr);
+}
+
+static bool
+is_writable_page (void *uaddr)
+{
+  struct spt_entry *entry = get_spt_entry_by_uaddr (pg_round_down (uaddr));
+  return entry && entry->writable;
 }
 
 /* Every argument that the uses passes is a pointer - this function
@@ -307,7 +315,11 @@ read_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!is_valid_user_ptr ((char *) *buffer))
+  if (!is_valid_user_ptr ((char *) *buffer) && !is_writable_page((char *) *buffer))
+    exit_failure ();
+
+  struct spt_entry *entry = get_spt_entry_by_uaddr (pg_round_down ((char *) *buffer));
+  if (entry && !entry->writable)
     exit_failure ();
 
   switch (*fd) {
@@ -344,7 +356,7 @@ write_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!is_valid_user_ptr ((char *) *buffer))
+  if (!is_valid_user_ptr ((char *) *buffer) && !is_writable_page((char *) *buffer))
     exit_failure ();
 
   switch (*fd) {
@@ -441,6 +453,14 @@ munmap_handler (void *args[])
   return 0;
 }
 
+/* Acquires the filesystem lock if we do not already hold it. 
+   
+   If we have already acquired the lock, then we keep track
+   of this in the should_release_lock variable which is used
+   later to determine when we should release the lock (i.e if
+   we had already acquired it before calling this function, we 
+   don't want to release it ourselves as our caller will do it 
+   for us). */
 bool
 safe_acquire_fs_lock (void) {
   if (lock_held_by_current_thread (&fs_lock)) 
@@ -450,6 +470,8 @@ safe_acquire_fs_lock (void) {
   return true;
 }
 
+/* Releases the file system lock if we were not holding it
+   before we loaded a page from the filesystem. */
 void
 safe_release_fs_lock (bool should_release_lock) {
   if (should_release_lock)

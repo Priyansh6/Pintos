@@ -146,15 +146,15 @@ pcb_get_child_by_tid (tid_t child_tid) {
 static void
 process_file_close (struct process_control_block *pcb, struct process_file *pfile)
 {
-  if (pfile->mapping == NULL) 
+  if (pfile->mapping == NULL) {
     hash_delete (&pcb->files, &pfile->hash_elem);
 
-  lock_acquire (&fs_lock);
-  file_close (pfile->file);
-  lock_release (&fs_lock);
+    lock_acquire (&fs_lock);
+    file_close (pfile->file);
+    lock_release (&fs_lock);
 
-  if (pfile->mapping == NULL)
     free (pfile);
+  }
 }
 
 /* Executes process_file_close on process_file associated with hash_elem e */
@@ -167,7 +167,10 @@ process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
   if (pfile->mapping != NULL)
     mmap_writeback (pfile);
 
+  //lock_acquire (&fs_lock);
   file_close (pfile->file);
+  //lock_release (&fs_lock);
+
   free (pfile);
 }
 
