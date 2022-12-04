@@ -5,10 +5,10 @@
 #include "threads/synch.h"
 
 static struct frame_table *frame_table;
-static uintptr_t frame_number_from_kaddr (void *kaddr);
 static bool frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
-unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED);
-void free_frame_elem(struct hash_elem *e, void *aux UNUSED);
+static unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED);
+static void free_frame_elem (struct frame_table_entry *fte);
+static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
 
 /* Initialises the frame table. */
 void
@@ -24,10 +24,10 @@ frame_table_init (void)
 }
 
 /* Function for hasing the frame_no of a frame_table_enrty. */
-unsigned 
+static unsigned 
 frame_hash_func (const struct hash_elem *elem, void *aux UNUSED) {
     struct frame_table_entry *e = hash_entry (elem, struct frame_table_entry, frame_hash_elem);
-    return hash_int ((int) e->frame_no);
+    return hash_int ((int) (e->kpage));
 }
 
 /* Function for comparting two frame_table_entries. */
@@ -37,22 +37,30 @@ frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUS
     const struct frame_table_entry *fte_a = hash_entry (a, struct frame_table_entry, frame_hash_elem);
     const struct frame_table_entry *fte_b = hash_entry (b, struct frame_table_entry, frame_hash_elem);
 
-    return fte_a->frame_no < fte_b->frame_no;
+    return (int) fte_a->kpage < (int) fte_b->kpage;
+}
+
+/* Frees a frame table entry and frees associated frame */
+static void
+free_frame_elem (struct frame_table_entry *fte)
+{
+    palloc_free_page (fte->kpage);
+    frame_table->num_frames--;
+    free(fte);
 }
 
 /* Auxilliary function for freeing frame table at shutdown. */
-void
-free_frame_elem (struct hash_elem *e, void *aux UNUSED)
-{
+static void 
+hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED) {
     struct frame_table_entry *fte = hash_entry(e, struct frame_table_entry, frame_hash_elem);
-    free(fte);
+    free_frame_elem (fte);
 }
 
 /* Free frame table. */
 void
 free_frame_table (void)
 {
-    hash_destroy(&frame_table->ft, free_frame_elem);
+    hash_destroy(&frame_table->ft, hash_free_frame_elem);
     free(frame_table);
 }
 
@@ -79,7 +87,7 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
 
     /* Inserting new page into frame table. */
     fte->upage = upage;
-    fte->frame_no = frame_number_from_kaddr (frame_addr);
+    fte->kpage = frame_addr;
     hash_insert (&frame_table->ft, &fte->frame_hash_elem);
 
     frame_table->num_frames++;
@@ -97,27 +105,17 @@ frame_table_free_frame (void *kaddr)
     struct frame_table_entry *fte;
 
     /* Locating the frame to be freed in the frame table. */
-    query.frame_no = frame_number_from_kaddr (kaddr);
-    e = hash_find (&frame_table->ft, &query.frame_hash_elem);
-    fte = hash_entry (e, struct frame_table_entry, frame_hash_elem);
-
     lock_acquire (&frame_table->ft_lock);
+    query.kpage = kaddr;
+    e = hash_find (&frame_table->ft, &query.frame_hash_elem);
 
-    /* Freeing page from memory. */
-    palloc_free_page (ptov (fte->frame_no));
+    if (e) {
+        fte = hash_entry (e, struct frame_table_entry, frame_hash_elem);
 
-    /* Removing page and freeing frame from frame table. */
-    hash_delete (&frame_table->ft, e);
-    frame_table->num_frames--;
-    free (fte);
+        /* Removing page and freeing frame from frame table. */
+        hash_delete (&frame_table->ft, e);
+        free_frame_elem (fte);
+    }
 
     lock_release (&frame_table->ft_lock);
-}
-
-/* Converts a kernel virtual address to a frame number by calling vtop and
-   then discarding the offset bits (right-most PGBITS). */
-static uintptr_t
-frame_number_from_kaddr (void *kaddr) 
-{
-    return vtop (kaddr) >> PGBITS;
 }

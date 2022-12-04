@@ -13,8 +13,8 @@ void frame_table_init(void);
 void free_frame_table(void);
 
 struct frame_table_entry {
-    uint8_t frame_no;                   /* Records which frame the page is currently in. */
-    void *upage;                        /* Pointer to the page that currently occupies the frame. */
+    void *kpage;                        /* Kernel virtual address that currently occupies the frame. */
+    void *upage;                        /* User virtual address that currently occupies the frame. */
     struct hash_elem frame_hash_elem;   /* Allows fte to be put into the hash frame_table. */
 };
 
