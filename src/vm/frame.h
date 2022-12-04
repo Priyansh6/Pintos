@@ -13,9 +13,15 @@ void frame_table_init(void);
 void free_frame_table(void);
 
 struct frame_table_entry {
-    uint8_t frame_no;                   /* Records which frame the page is currently in. */
+    void *kpage;                        /* Records which frame the page is currently in. */
     void *upage;                        /* Pointer to the page that currently occupies the frame. */
+    struct list owners;
     struct hash_elem frame_hash_elem;   /* Allows fte to be put into the hash frame_table. */
+};
+
+struct owner {
+    struct thread *thread;
+    struct list_elem elem;
 };
 
 /* This might be a bad idea to not malloc as it will go on the kernel stack space */
@@ -28,5 +34,6 @@ struct frame_table {
 
 void *frame_table_get_frame (void *upage, enum palloc_flags flags);
 void frame_table_free_frame (void *kaddr);
+struct frame_table_entry *get_frame_by_kpage (void *kpage);
 
 #endif
