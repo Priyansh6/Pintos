@@ -170,7 +170,7 @@ get_and_install_page (struct spt_entry *entry) {
     }
 
     if (entry->entry_type == FSYS) {
-      // printf("Installed inode %p with offset %d into thread %d's page table at user address %p.\n", file_get_inode (entry->file), entry->ofs, thread_current()->tid, entry->uaddr);
+      //printf("Installed inode %p with offset %d into thread %d's page table at user address %p.\n", file_get_inode (entry->file), entry->ofs, thread_current()->tid, entry->uaddr);
     }
 
   } else {

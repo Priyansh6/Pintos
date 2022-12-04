@@ -111,10 +111,10 @@ frame_table_free_frame (void *kaddr)
 
     struct spt_entry *spage_entry = get_spt_entry_by_uaddr (fte->upage);
 
-    if (spage_entry != NULL && spage_entry->entry_type == FSYS) {
+    if (spage_entry != NULL && spage_entry->entry_type == FSYS && !spage_entry->writable) {
 
-            // printf("Freeing shared frame on thread %d corresponding to inode %p with offset %d and user address %p.\n", thread_current ()->tid, file_get_inode (spage_entry->file), spage_entry->ofs, spage_entry->uaddr);
-
+        //printf("Freeing shared frame on thread %d corresponding to inode %p with offset %d and user address %p.\n", thread_current ()->tid, file_get_inode (spage_entry->file), spage_entry->ofs, spage_entry->uaddr);
+        //printf("WRITTABLE: %d\n", spage_entry->writable);
 
         // We have to be careful here because we could be dealing with a shared frame.
         //

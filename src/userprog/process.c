@@ -798,6 +798,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (page == NULL) {
         /* If we have a new entry to the spt, its writable status is set to the writable argument. */
         page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+        if (!page)
+          return false;
 
         page->writable = writable;
         page->uaddr = upage;
