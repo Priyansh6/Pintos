@@ -152,6 +152,7 @@ main (void)
   #endif
   #ifdef VM
   free_frame_table ();
+  free_shared_table ();
   #endif
   shutdown ();
   thread_exit ();

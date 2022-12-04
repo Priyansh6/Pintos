@@ -129,8 +129,6 @@ frame_table_free_frame (void *kaddr)
         struct shared_file *file = get_shared_file (file_get_inode (spage_entry->file));
         struct shared_file_page *page = get_shared_page (file, spage_entry->ofs);
 
-        
-
         if (file != NULL && page != NULL) {
 
             if (list_size (&fte->owners) > 1) {
@@ -146,6 +144,12 @@ frame_table_free_frame (void *kaddr)
                can safely free it. We also need to remove the shared_file_page entry. */
             hash_delete (&file->shared_pages_table, &page->elem);
             free (page);
+
+            if (hash_empty (&file->shared_pages_table)) {
+                hash_destroy (&file->shared_pages_table, NULL);
+                hash_delete (&shared_file_table, &file->elem);
+                free (file);
+            }
 
         }
 
@@ -168,12 +172,12 @@ static struct owner *
 find_owner (struct list *owners)
 {
     struct list_elem *e;
-    for (e = list_begin (owners); e != list_end (owners); e = list_next (e))
-    {
+    for (e = list_begin (owners); e != list_end (owners); e = list_next (e)) {
       struct owner *owner = list_entry (e, struct owner, elem);
       if (owner->thread->tid == thread_current ()->tid)
         return owner;
     }
+    return NULL;
 }
 
 struct frame_table_entry *

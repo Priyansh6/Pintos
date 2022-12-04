@@ -36,7 +36,7 @@ void handle_user_page_fault (void *fault_addr) {
         break;
     case MMAP:
     case FSYS:
-        if (entry->entry_type == FSYS && use_shareable_file (entry))
+        if (use_shareable_file (entry))
           return;
         kpage = load_page_from_filesys (entry);
         break;
@@ -48,8 +48,6 @@ void handle_user_page_fault (void *fault_addr) {
   /* We should always succeed, so PANIC the kernel if we ever don't. */
   if (kpage == NULL)
     PANIC ("Failed to load page from filesystem.\n");
-
-  
 
 }
 
@@ -91,7 +89,6 @@ load_page_from_filesys (struct spt_entry *entry) {
   memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
 
   safe_release_fs_lock (should_release_lock);
-
 
   if (!entry->writable)
     insert_shared_page (file_get_inode (entry->file), entry->ofs, kpage);
@@ -345,4 +342,19 @@ offset_less_func (const struct hash_elem *a, const struct hash_elem *b, void *au
   struct shared_file_page *page_b = hash_entry (b, struct shared_file_page, elem);
 
   return ((int) page_a->page_offset) < ((int) page_b->page_offset);
+}
+
+/* Auxilliary function for freeing shared table. */
+void
+free_shared_file_elem (struct hash_elem *e, void *aux UNUSED)
+{
+    struct shared_file *file = hash_entry(e, struct shared_file, elem);
+    free(file);
+}
+
+/* Free shared files table. */
+void
+free_shared_table (void)
+{
+    hash_destroy(&shared_file_table, &free_shared_file_elem);
 }

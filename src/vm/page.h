@@ -4,6 +4,7 @@
 #include <hash.h>
 #include "filesys/file.h"
 #include "filesys/off_t.h"
+#include "threads/synch.h"
 
 #define MAX_USER_STACK_SIZE 0x400000
 
@@ -34,6 +35,7 @@ unsigned spt_hash_func (const struct hash_elem *elem, void *aux UNUSED);
 bool spt_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 
 struct hash shared_file_table;
+struct lock shared_table_lock;
 
 struct shared_file {
     struct inode *file_inode;
@@ -58,6 +60,9 @@ bool inode_less_func (const struct hash_elem *a, const struct hash_elem *b, void
 
 unsigned offset_hash_func (const struct hash_elem *elem, void *aux UNUSED);
 bool offset_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
+
+void free_shared_file_elem (struct hash_elem *e, void *aux UNUSED);
+void free_shared_table (void);
 
 void handle_user_page_fault (void *fault_addr);
 void stack_grow (void *fault_addr);
