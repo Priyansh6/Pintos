@@ -185,7 +185,7 @@ free_spt_entry (struct spt_entry *entry) {
     pagedir_clear_page (pd, entry->uaddr);
     frame_table_free_frame (kpage);
   } else if (entry->entry_type == SWAP && load_page_from_swap (entry)) {
-    frame_table_free_frame (kpage);
+    swap_clear (entry->swap_slot);
   }
 
   free (entry);
