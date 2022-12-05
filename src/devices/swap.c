@@ -73,3 +73,11 @@ swap_in (void *vaddr, size_t slot)
   // clear the swap-slot previously used by this page
   bitmap_reset (swap_bitmap, slot / PAGE_SECTORS);
 }
+
+/* Clears page in swap-slot SLOT by clearing its entry in the bitmap. */
+void
+swap_clear (size_t slot) 
+{ 
+  // Clear the swap-slot previously used by this page
+  bitmap_reset (swap_bitmap, slot / PAGE_SECTORS);
+}

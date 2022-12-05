@@ -8,8 +8,9 @@
 static struct hash *frame_table;          /* Hash to store all the frame_table_entries. */
 static struct owner *find_owner (struct list *owners);
 static bool frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
-unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED);
-void free_frame_elem(struct hash_elem *e, void *aux UNUSED);
+static unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED);
+static void free_frame_elem (struct frame_table_entry *fte);
+static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
 
 /* Initialises the frame table. */
 void
@@ -23,7 +24,7 @@ frame_table_init (void)
 }
 
 /* Function for hasing the frame_no of a frame_table_enrty. */
-unsigned 
+static unsigned 
 frame_hash_func (const struct hash_elem *elem, void *aux UNUSED) {
     struct frame_table_entry *e = hash_entry (elem, struct frame_table_entry, frame_hash_elem);
     return hash_int ((int) e->kpage);
@@ -39,20 +40,27 @@ frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUS
     return (int) fte_a->kpage < (int) fte_b->kpage;
 }
 
-/* Auxilliary function for freeing frame table at shutdown. */
-void
-free_frame_elem (struct hash_elem *e, void *aux UNUSED)
+/* Frees a frame table entry and frees associated frame */
+static void
+free_frame_elem (struct frame_table_entry *fte)
 {
-    struct frame_table_entry *fte = hash_entry(e, struct frame_table_entry, frame_hash_elem);
+    palloc_free_page (fte->kpage);
     free(fte);
+}
+
+/* Auxilliary function for freeing frame table at shutdown. */
+static void 
+hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED) {
+    struct frame_table_entry *fte = hash_entry(e, struct frame_table_entry, frame_hash_elem);
+    free_frame_elem (fte);
 }
 
 /* Free frame table. */
 void
 free_frame_table (void)
 {
-    hash_destroy(frame_table , free_frame_elem);
-    free(frame_table);
+    hash_destroy (frame_table, hash_free_frame_elem);
+    free (frame_table);
 }
 
 /* Wrapper around palloc_get_page() that also manages insertions
@@ -95,7 +103,6 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
 void 
 frame_table_free_frame (void *kaddr)
 {
-
     lock_acquire (&ft_lock);
 
     struct frame_table_entry query = {.kpage = kaddr};
@@ -103,6 +110,8 @@ frame_table_free_frame (void *kaddr)
     struct frame_table_entry *fte = e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
 
     /* -------------------------------------------------- */
+
+    ASSERT (e != NULL);
 
 
     struct spt_entry *spage_entry = get_spt_entry_by_uaddr (fte->upage);
@@ -153,14 +162,12 @@ frame_table_free_frame (void *kaddr)
 
     /* -------------------------------------------------- */
 
-    /* Freeing page from memory. */
-    palloc_free_page (kaddr);
-
     /* Removing page and freeing frame from frame table. */
     hash_delete (frame_table, e);
-    free (fte);
+    free_frame_elem (fte);
 
     lock_release (&ft_lock);
+
 }
 
 static struct owner *
@@ -183,3 +190,6 @@ get_frame_by_kpage (void *kpage)
 
     return e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
 }
+
+
+

@@ -173,19 +173,9 @@ static void
 process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
 {
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
-
-  
-
-  //lock_acquire (&fs_lock);
-  
   bool should_release = safe_acquire_fs_lock ();
   file_close (pfile->file);
   safe_release_fs_lock (should_release);
-
-  
-  
-  //lock_release (&fs_lock);
-
   free (pfile);
 }
 
@@ -456,6 +446,8 @@ process_exit (void)
     }
 
 
+  destroy_spt ();
+
   /* Close all files open by the current process and remove all
      files from our PCB's file list. Also handles re-allowing writes
      to our executable. */
@@ -488,9 +480,6 @@ process_exit (void)
   if (parent_pcb == NULL || parent_pcb->has_exited)
     free (pcb);
     
-
-
-
 }
 
 /* Sets up the CPU for running user code in the current

@@ -16,6 +16,7 @@ static void * load_zero_page (struct spt_entry *entry);
 static void * load_page_from_swap (struct spt_entry *entry);
 static bool use_shareable_file (struct spt_entry *entry);
 void *get_and_install_page (struct spt_entry *entry);
+static void hash_free_spt_entry (struct hash_elem *elem, void *aux UNUSED);
 
 /* If we encounter a page fault, we first want to check our supplemental page table
    to see if we are able to locate that memory (it may not have been loaded in yet, or 
@@ -206,11 +207,11 @@ struct spt_entry *
 get_spt_entry_by_uaddr (void *uaddr)
 {
   struct spt_entry spt_entry = {.uaddr = uaddr};
+  ASSERT (&thread_current()->spt != NULL);
   struct hash_elem *found_elem = hash_find (&thread_current()->spt, &spt_entry.spt_hash_elem);
 
   return found_elem == NULL ? NULL : hash_entry (found_elem, struct spt_entry, spt_hash_elem);
 }
-
 /* Initialises the shared file table hash map. */
 void
 init_shared_file_table (void)
@@ -283,11 +284,28 @@ insert_shared_page (struct inode *file_inode, uint32_t page_offset, void *kpage)
 
 }
 
-/* Frees a supplemental page table entry. */
-void 
-free_spt_entry (struct hash_elem *elem, void *aux UNUSED) 
-{
-  free (hash_entry (elem, struct spt_entry, spt_hash_elem));
+/* Destroys the current thread's spt. */
+void destroy_spt (void) {
+  hash_clear (&thread_current ()->spt, &hash_free_spt_entry);
+}
+
+/* Frees a given spt_entry as well as the associated page by clearing it
+   from the process's page directory and removing it from the frame table.
+   Assumes the spt_entry is current thread's. */
+void
+free_spt_entry (struct spt_entry *entry) {
+  if (entry->entry_type == SWAP)
+    swap_clear (entry->swap_slot);
+
+  free (entry);
+}
+
+/* Frees the given spt hash table entry. Assumes the spt_entry is current thread's */
+static void 
+hash_free_spt_entry (struct hash_elem *elem, void *aux UNUSED) {
+  struct spt_entry *entry = hash_entry (elem, struct spt_entry, spt_hash_elem);
+  free_spt_entry (entry);
+
 }
 
 /* Hashing function for a supplemental page table entry. */

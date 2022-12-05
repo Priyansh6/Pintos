@@ -8,16 +8,25 @@
 
 #define MAX_USER_STACK_SIZE 0x400000
 
-enum spt_entry_type {SWAP, FSYS, ZEROPAGE, MMAP};
+enum spt_entry_type
+{
+    SWAP,
+    FSYS,
+    ZEROPAGE,
+    MMAP
+};
 
-struct spt_entry {
+struct spt_entry
+{
     void *uaddr;                    /* Address in user virtual space of page. */
-    enum spt_entry_type entry_type; /* SPT entries can be either SWAP, (if a page is held in swap space), 
-                                       FSYS (if a page is held in the filesystem), or ZEROPAGE (since 
+    enum spt_entry_type entry_type; /* SPT entries can be either SWAP, (if a page is held in swap space),
+                                       FSYS (if a page is held in the filesystem), or ZEROPAGE (since
                                        zero pages should only be loaded into a frame just before they are written to).*/
-    bool writable;                  
-    union {
-        struct {
+    bool writable;
+    union
+    {
+        struct
+        {
             struct file *file;
             off_t ofs;
             uint32_t read_bytes;
@@ -28,7 +37,8 @@ struct spt_entry {
     struct hash_elem spt_hash_elem;
 };
 
-void free_spt_entry (struct hash_elem *elem, void *aux UNUSED);
+void destroy_spt (void);
+void free_spt_entry (struct spt_entry *entry);
 struct spt_entry *get_spt_entry_by_uaddr (void *uaddr);
 
 unsigned spt_hash_func (const struct hash_elem *elem, void *aux UNUSED);
