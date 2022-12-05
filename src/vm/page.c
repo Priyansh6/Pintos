@@ -15,6 +15,7 @@ bool load_page_from_filesys (struct spt_entry *entry);
 bool load_zero_page (struct spt_entry *entry);
 void *get_and_install_page (struct spt_entry *entry);
 bool load_page_from_swap (struct spt_entry *entry);
+static void hash_free_spt_entry (struct hash_elem *elem, void *aux UNUSED);
 
 /* If we encounter a page fault, we first want to check our supplemental page table
    to see if we are able to locate that memory (it may not have been loaded in yet, or 
@@ -56,7 +57,6 @@ load_page_from_swap (struct spt_entry *entry) {
 }
 
 /* Loads a file into a newly allocated page.
-   OM WAS HERE
    We can't be in an interrupt when we call this function since we try to acquire 
    fs_lock. If another process had already acquired the fs_lock then we would
    deadlock. */
@@ -166,10 +166,36 @@ get_spt_entry_by_uaddr (void *uaddr)
   return found_elem == NULL ? NULL : hash_entry (found_elem, struct spt_entry, spt_hash_elem);
 }
 
-/* Frees the given elem hash table entry. */
-void 
-free_spt_entry (struct hash_elem *elem, void *aux UNUSED) {
-  free (hash_entry (elem, struct spt_entry, spt_hash_elem));
+/* Destroys the current thread's spt. */
+void destroy_spt (void) {
+  struct thread *cur = thread_current ();
+  hash_destroy (&cur->spt, hash_free_spt_entry);
+}
+
+/* Frees a given spt_entry as well as the associated page by clearing it
+   from the process's page directory and removing it from the frame table.
+   Assumes the spt_entry is current thread's. */
+void
+free_spt_entry (struct spt_entry *entry) {
+  struct thread *cur = thread_current ();
+  uint32_t *pd = cur->pagedir;
+
+  void *kpage = pagedir_get_page(pd, entry->uaddr);
+  if (kpage) {
+    pagedir_clear_page (pd, entry->uaddr);
+    frame_table_free_frame (kpage);
+  } else if (entry->entry_type == SWAP && load_page_from_swap (entry)) {
+    frame_table_free_frame (kpage);
+  }
+
+  free (entry);
+}
+
+/* Frees the given spt hash table entry. Assumes the spt_entry is current thread's */
+static void 
+hash_free_spt_entry (struct hash_elem *elem, void *aux UNUSED) {
+  struct spt_entry *entry = hash_entry (elem, struct spt_entry, spt_hash_elem);
+  free_spt_entry (entry);
 }
 
 unsigned 
