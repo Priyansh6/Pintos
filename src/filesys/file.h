@@ -27,7 +27,8 @@ void file_seek (struct file *, off_t);
 off_t file_tell (struct file *);
 off_t file_length (struct file *);
 
-/* File comparison */
+/* File comparison and hashing */
 bool file_compare (struct file *, struct file *);
+unsigned file_hash (struct file *);
 
 #endif /* filesys/file.h */
