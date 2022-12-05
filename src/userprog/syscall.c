@@ -307,7 +307,7 @@ read_handler (void *args[])
     case 0:
       /* Read from user input device (i.e keyboard). */
       for (uint32_t i = 0; i < *size; i++)
-        *buffer[i] = input_getc ();
+        (*buffer)[i] = input_getc ();
       return *size;
     case 1:
       /* Reserved for writing to STDOUT. */

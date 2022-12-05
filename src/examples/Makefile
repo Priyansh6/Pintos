@@ -3,8 +3,8 @@ SRCDIR = ..
 # Test programs to compile, and a list of sources for each.
 # To add a new test, put its name on the PROGS list
 # and then add a name_SRC line that lists its source files.
-PROGS = cat cmp cp echo write halt hex-dump mcat mcp rm \
-	bubsort insult lineup matmult recursor
+PROGS = cat cmp cp echo shell write halt hex-dump mcat mcp rm \
+	clear touch bubsort insult lineup matmult recursor
 
 # Should work from task 2 onward.
 cat_SRC = cat.c
@@ -12,6 +12,9 @@ cmp_SRC = cmp.c
 cp_SRC = cp.c
 echo_SRC = echo.c
 write_SRC = write.c
+shell_SRC = shell.c
+clear_SRC = clear.c
+touch_SRC = touch.c
 halt_SRC = halt.c
 hex-dump_SRC = hex-dump.c
 insult_SRC = insult.c
