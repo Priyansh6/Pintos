@@ -19,12 +19,8 @@ struct frame_table_entry {
 };
 
 /* This might be a bad idea to not malloc as it will go on the kernel stack space */
-struct frame_table {
-    uint16_t max_frames;                 /* Maximum number of frames allowed in the frame table. */
-    uint16_t num_frames;                 /* Current number of frames in use in the frame table. */
-    struct hash ft;                      /* Hash to store all the frame_table_entries. */
-    struct lock ft_lock;                 /* Lock to allow for synchronisation on the frame table. */
-};
+
+struct lock ft_lock;                    /* Lock to allow for synchronisation on the frame table. */
 
 void *frame_table_get_frame (void *upage, enum palloc_flags flags);
 void frame_table_free_frame (void *kaddr);
