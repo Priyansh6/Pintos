@@ -40,6 +40,7 @@
 #endif
 #ifdef VM
 #include "vm/frame.h"
+#include "vm/page.h"
 #endif
 
 /* Page directory with kernel mappings only. */
@@ -103,7 +104,8 @@ main (void)
   malloc_init ();
   paging_init ();
   #ifdef VM
-  frame_table_init();
+  frame_table_init ();
+  init_shared_file_table ();
   #endif
 
   /* Segmentation. */
@@ -150,6 +152,7 @@ main (void)
   #endif
   #ifdef VM
   free_frame_table ();
+  free_shared_table ();
   #endif
   shutdown ();
   thread_exit ();

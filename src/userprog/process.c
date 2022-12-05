@@ -41,6 +41,7 @@ static void process_file_close (struct process_control_block *pcb, struct proces
 
 static bool fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 static unsigned process_file_hash (const struct hash_elem *elem, void *aux UNUSED);
+static void process_mmap_writeback (struct hash_elem *e, void *aux UNUSED);
 
 static bool is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write);
 
@@ -157,18 +158,32 @@ process_file_close (struct process_control_block *pcb, struct process_file *pfil
   }
 }
 
-/* Executes process_file_close on process_file associated with hash_elem e */
 static void
-process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
+process_mmap_writeback (struct hash_elem *e, void *aux UNUSED)
 {
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
 
   /* Write back any changes to mapped files. */
   if (pfile->mapping != NULL)
     mmap_writeback (pfile);
+}
+
+/* Executes process_file_close on process_file associated with hash_elem e */
+static void
+process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
+{
+  struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
+
+  
 
   //lock_acquire (&fs_lock);
+  
+  bool should_release = safe_acquire_fs_lock ();
   file_close (pfile->file);
+  safe_release_fs_lock (should_release);
+
+  
+  
   //lock_release (&fs_lock);
 
   free (pfile);
@@ -420,8 +435,26 @@ process_exit (void)
   uint32_t *pd;
 
   /* Gets our own PCB. */
-
   struct process_control_block *pcb = process_get_pcb ();
+  hash_apply (&pcb->files, &process_mmap_writeback);
+
+  /* Destroy the current process's page directory and switch back
+     to the kernel-only page directory. */
+  pd = cur->pagedir;
+  if (pd != NULL) 
+    {
+      /* Correct ordering here is crucial.  We must set
+         cur->pagedir to NULL before switching page directories,
+         so that a timer interrupt can't switch back to the
+         process page directory.  We must activate the base page
+         directory before destroying the process's page
+         directory, or our active page directory will be one
+         that's been freed (and cleared). */
+      cur->pagedir = NULL;
+      pagedir_activate (NULL);
+      pagedir_destroy (pd);
+    }
+
 
   /* Close all files open by the current process and remove all
      files from our PCB's file list. Also handles re-allowing writes
@@ -454,24 +487,10 @@ process_exit (void)
   sema_up (&pcb->wait_sema);
   if (parent_pcb == NULL || parent_pcb->has_exited)
     free (pcb);
-
-  /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
-  pd = cur->pagedir;
-  if (pd != NULL) 
-    {
-      /* Correct ordering here is crucial.  We must set
-         cur->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared). */
-      cur->pagedir = NULL;
-      pagedir_activate (NULL);
-      pagedir_destroy (pd);
-    }
     
+
+
+
 }
 
 /* Sets up the CPU for running user code in the current
@@ -779,6 +798,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (page == NULL) {
         /* If we have a new entry to the spt, its writable status is set to the writable argument. */
         page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+        if (!page)
+          return false;
 
         page->writable = writable;
         page->uaddr = upage;
