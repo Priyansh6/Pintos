@@ -31,5 +31,6 @@ struct lock ft_lock;                    /* Lock to allow for synchronisation on 
 void *frame_table_get_frame (void *upage, enum palloc_flags flags);
 void frame_table_free_frame (void *kaddr);
 struct frame_table_entry *get_frame_by_kpage (void *kpage);
+struct owner *find_owner (struct list *owners);
 
 #endif

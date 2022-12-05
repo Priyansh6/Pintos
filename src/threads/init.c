@@ -43,7 +43,7 @@
 #endif
 #ifdef VM
 #include "vm/frame.h"
-#include "vm/page.h"
+#include "vm/share.h"
 #endif
 
 /* Page directory with kernel mappings only. */

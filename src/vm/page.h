@@ -20,8 +20,8 @@ struct spt_entry
 {
     void *uaddr;                    /* Address in user virtual space of page. */
     enum spt_entry_type entry_type; /* SPT entries can be either SWAP, (if a page is held in swap space),
-                                       FSYS (if a page is held in the filesystem), or ZEROPAGE (since
-                                       zero pages should only be loaded into a frame just before they are written to).*/
+                                        FSYS (if a page is held in the filesystem), or ZEROPAGE (since
+                                        zero pages should only be loaded into a frame just before they are written to).*/
     bool writable;
     union
     {
@@ -43,36 +43,6 @@ struct spt_entry *get_spt_entry_by_uaddr (void *uaddr);
 
 unsigned spt_hash_func (const struct hash_elem *elem, void *aux UNUSED);
 bool spt_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
-
-struct hash shared_file_table;
-struct lock shared_table_lock;
-
-struct shared_file {
-    struct inode *file_inode;
-    uint32_t num_sharers;
-    struct hash shared_pages_table;
-    struct hash_elem elem;
-};
-
-struct shared_file_page {
-    uint32_t page_offset;
-    struct frame_table_entry *frame_entry;
-    struct hash_elem elem;
-};
-
-void init_shared_file_table (void);
-struct shared_file *get_shared_file (struct inode *file_inode);
-struct shared_file_page *get_shared_page (struct shared_file *file, uint32_t page_offset);
-void insert_shared_page (struct inode *file_inode, uint32_t page_offset, void *kpage);
-
-unsigned inode_hash_func (const struct hash_elem *elem, void *aux UNUSED);
-bool inode_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
-
-unsigned offset_hash_func (const struct hash_elem *elem, void *aux UNUSED);
-bool offset_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
-
-void free_shared_file_elem (struct hash_elem *e, void *aux UNUSED);
-void free_shared_table (void);
 
 void handle_user_page_fault (void *fault_addr);
 void stack_grow (void *fault_addr);
