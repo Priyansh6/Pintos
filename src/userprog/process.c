@@ -809,6 +809,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       page->ofs = ofs;
       page->read_bytes = page_read_bytes;
       page->zero_bytes = page_zero_bytes;
+      page->in_memory = false;
     
       /* Advance. */
       read_bytes -= page_read_bytes;

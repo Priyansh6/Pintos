@@ -15,7 +15,8 @@ void free_frame_table(void);
 struct frame_table_entry {
     void *kpage;                        /* Records which frame the page is currently in. */
     void *upage;                        /* Pointer to the page that currently occupies the frame. */
-    struct list owners;
+    struct lock fte_lock;               /* Frame table entry lock for eviction. */
+    struct list owners;                 /* List of owners which contains the threads that are sharing this frame. */
     struct hash_elem frame_hash_elem;   /* Allows fte to be put into the hash frame_table. */
 };
 
@@ -23,8 +24,6 @@ struct owner {
     struct thread *thread;
     struct list_elem elem;
 };
-
-/* This might be a bad idea to not malloc as it will go on the kernel stack space */
 
 struct lock ft_lock;                    /* Lock to allow for synchronisation on the frame table. */
 

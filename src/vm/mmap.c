@@ -56,13 +56,14 @@ mmap_create (int fd, void *uaddr)
 
         page->writable = true; // this seems okay for now, maybe we will need to make this dependent on a file's deny_write field
         page->uaddr = uaddr + PGSIZE * i;
-        page->entry_type = MMAP;
+        page->entry_type = FSYS;
         page->file = file_reopen (file); // Not sure if we should just file reopen once (don't think we should)
         page->ofs = PGSIZE * i;
 
         uint32_t map_bytes = left_to_map < PGSIZE ? left_to_map : PGSIZE;
         page->read_bytes = map_bytes;
         page->zero_bytes = PGSIZE - map_bytes;
+        page->in_memory = false;
 
         ASSERT (hash_insert (&thread_current()->spt, &page->spt_hash_elem) == NULL);
 

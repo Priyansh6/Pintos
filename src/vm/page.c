@@ -38,10 +38,11 @@ handle_user_page_fault (void *fault_addr)
     case SWAP:
         kpage = load_page_from_swap (entry);
         break;
-    case MMAP:
     case FSYS:
-        if (load_shared_page (entry))
+        if (load_shared_page (entry)) {
+          entry->in_memory = true;
           return;
+        }
         kpage = load_page_from_filesys (entry);
         break;
     case ZEROPAGE:
@@ -53,15 +54,16 @@ handle_user_page_fault (void *fault_addr)
   if (kpage == NULL)
     PANIC ("Failed to load page from filesystem.\n");
 
+  entry->in_memory = true;
 }
 
 /* Loads a page in from swap into user address entry->uaddr. */
 static void * 
 load_page_from_swap (struct spt_entry *entry) 
 {
-  // Needs fixing
-  swap_in (entry->uaddr, entry->swap_slot);
-  return NULL;
+  void *kaddr = get_and_install_page (entry);
+  swap_in (kaddr, entry->swap_slot);
+  return kaddr;
 }
 
 /* Loads a file into a newly allocated page.
@@ -227,7 +229,7 @@ destroy_spt (void)
 void
 free_spt_entry (struct spt_entry *entry) 
 {
-  if (entry->entry_type == SWAP)
+  if (entry->entry_type == SWAP && !entry->in_memory)
     swap_clear (entry->swap_slot);
   free (entry);
 }

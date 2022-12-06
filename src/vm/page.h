@@ -13,7 +13,6 @@ enum spt_entry_type
     SWAP,
     FSYS,
     ZEROPAGE,
-    MMAP
 };
 
 struct spt_entry
@@ -23,6 +22,7 @@ struct spt_entry
                                         FSYS (if a page is held in the filesystem), or ZEROPAGE (since
                                         zero pages should only be loaded into a frame just before they are written to).*/
     bool writable;
+    bool in_memory;
     union
     {
         struct
