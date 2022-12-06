@@ -4,7 +4,7 @@ SRCDIR = ..
 # To add a new test, put its name on the PROGS list
 # and then add a name_SRC line that lists its source files.
 PROGS = cat cmp cp echo shell write halt hex-dump mcat mcp rm \
-	clear touch bubsort insult lineup matmult recursor
+	clear touch vim bubsort insult lineup matmult recursor
 
 # Should work from task 2 onward.
 cat_SRC = cat.c
@@ -15,6 +15,7 @@ write_SRC = write.c
 shell_SRC = shell.c
 clear_SRC = clear.c
 touch_SRC = touch.c
+vim_SRC = vim.c
 halt_SRC = halt.c
 hex-dump_SRC = hex-dump.c
 insult_SRC = insult.c
