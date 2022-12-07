@@ -15,6 +15,9 @@ static unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED)
 static void free_frame_elem (struct frame_table_entry *fte);
 static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
 static struct frame_table_entry *choose_victim (void);
+static void remove_and_invalidate_owners (struct frame_table_entry *fte);
+static struct spt_entry *prepare_spt_entry_for_eviction (void *uaddr);
+static void evict_page (struct spt_entry *page, void *kpage);
 
 static struct hash_iterator RR_frame_index;
 
@@ -86,105 +89,19 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
   if (frame_addr == NULL) {
     /* Getting a frame to be evicted. */
     fte = choose_victim ();
-    lock_acquire (&fte->fte_lock);
-
-    ASSERT (fte != NULL);
-    ASSERT (fte->upage != NULL);
 
     /* Invalidate the page table entries for this frame for all owners. 
        Must be done in a lock to prevent others adding or removing themselves 
        mid-eviction. */
-    struct list_elem *e;
-    for (e = list_begin (&fte->owners); e != list_end (&fte->owners); ) {
-        struct owner *o = list_entry (e, struct owner, elem);
-        ASSERT (o != NULL);
+    remove_and_invalidate_owners (fte);
 
-        /* Clear the owners page table entry that points to this frame. */
-        pagedir_clear_page (o->thread->pagedir, fte->upage);
+    /* Get the spage table entry. Creates an spt entry if one does not already exist,
+       and removes it from the share table if the page is shareable. */
+    struct spt_entry *page = prepare_spt_entry_for_eviction (fte->upage);
 
-        /* Remove owners from list. */
-        list_remove (e);
-
-        /* Before we free the owner, get the next list elem. */
-        e = list_next (e);
-        free (o);
-    }
-
-    /* Get the spage table entry. */
-    struct spt_entry *page = get_spt_entry_by_uaddr (fte->upage);
-
-    /* If we don't have a spage table entry (i.e stack page) then we create one. */
-    if (page == NULL) {
-        page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
-
-        if (page == NULL)
-          PANIC ("no idea what to do here tbh");
-
-        page->uaddr = fte->upage;
-        page->entry_type = SWAP;
-        page->writable = true;
-
-        hash_insert (&thread_current ()->spt, &page->spt_hash_elem);
-    }
-
-    /* Remove the page from the shared table. */
-    if (!page->writable) {
-      lock_acquire (&shared_table_lock);
-
-      struct shared_file *s_file = get_shared_file (file_get_inode (page->file));
-      struct shared_file_page *s_page = get_shared_page (s_file, page->ofs);
-
-      hash_delete (&s_file->shared_pages_table, &s_page->elem);
-      free (s_page);
-
-      lock_release (&shared_table_lock);
-    }
-
-    switch (page->entry_type) {
-      case FSYS:
-        if (page->writable) {
-          /* This page is not shared by any other processes so we just need to put the page
-             on the swap disk and update our own SPT. */
-          page->file = NULL;
-          page->ofs = NULL;
-          page->read_bytes = NULL;
-          page->zero_bytes = NULL;
-
-          page->entry_type = SWAP;
-          page->swap_slot = swap_out (fte->kpage);
-        } else {
-          /* Read only page. This page could be shared, but we have already removed
-             all owners from the frame and updated their page tables. Also, all SPT
-             will already have all the information to load the page back in if needed
-             so we don't need to do anything here. */
-        }
-        break;
-      case ZEROPAGE:
-        if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr)) {
-          /* The page has been written to, so we need to update our SPT to change the page entry type
-             and also put our page on the swap disk. It is not a shared page as we only share read only pages. */
-          page->entry_type = SWAP;
-          page->swap_slot = swap_out (fte->kpage);
-        } else {
-          /* The page has not been written to and is still a zeropage. It *could* be shared, but
-             this wouldn't matter as if it were, it would be read only and so we know that no other
-             process has written to it. */
-        }
-        break;
-      case SWAP:
-        /* All we need to do here is place the page on the swap disk and update our own SPT entry
-           to provide information on where exactly we place the page within the disk. */
-        page->entry_type = SWAP;
-        page->swap_slot = swap_out (fte->kpage);
-        break;
-    }
-
-    /* The page has now been swapped out, so we must update the in_memory flag our our SPT entry. */
-    page->in_memory = false;
+    /* Evict the page. */
+    evict_page (page, fte->kpage);
     
-    ASSERT (list_size (&fte->owners) == 0);
-
-    lock_release (&fte->fte_lock);
   } else {
     /* Creating new frame table entry on the heap. */
     fte = (struct frame_table_entry *) malloc (sizeof (struct frame_table_entry));
@@ -228,6 +145,7 @@ frame_table_free_frame (void *kaddr)
   }
 
   //lock_release (&fte->fte_lock);
+
   /* Removing page and freeing frame from frame table. */
   hash_delete (&frame_table, e);
   free_frame_elem (fte);
@@ -246,12 +164,113 @@ find_owner (struct list *owners)
   return NULL;
 }
 
+/* Removes all owners of the given frame and invalidates their page table
+   entries. */
+static void 
+remove_and_invalidate_owners (struct frame_table_entry *fte) 
+{
+  struct list_elem *e;
+  for (e = list_begin (&fte->owners); e != list_end (&fte->owners); ) {
+    struct owner *o = list_entry (e, struct owner, elem);
+    ASSERT (o != NULL);
+
+    /* Invalidate owner's page table entry that points to this frame. */
+    pagedir_clear_page (o->thread->pagedir, fte->upage);
+
+    /* Remove owners from list. */
+    list_remove (e);
+
+    /* Before we free the owner, get the next list elem. */
+    e = list_next (e);
+    free (o);
+  }
+}
+
+/* Prepares a supplemental page table entry for eviction: if the entry doesn't exist,
+   for example in the case of a stack page, then we create one. If the entry indicates
+   that the page is read only, then we remove it from the share table as well. */
+static struct spt_entry *
+prepare_spt_entry_for_eviction (void *uaddr)
+{
+  struct spt_entry *page = get_spt_entry_by_uaddr (uaddr);
+
+  /* If we don't have a spage table entry (i.e stack page) then we create one. */
+  if (page == NULL) {
+    page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+
+    if (page == NULL)
+      PANIC ("no idea what to do here tbh");
+
+    page->uaddr = uaddr;
+    page->entry_type = SWAP;
+    page->writable = true;
+
+    hash_insert (&thread_current ()->spt, &page->spt_hash_elem);
+  }
+
+  /* Remove the page from the shared table. */
+  if (!page->writable) {
+    lock_acquire (&shared_table_lock);
+
+    struct shared_file *s_file = get_shared_file (file_get_inode (page->file));
+    struct shared_file_page *s_page = get_shared_page (s_file, page->ofs);
+
+    hash_delete (&s_file->shared_pages_table, &s_page->elem);
+    free (s_page);
+
+    lock_release (&shared_table_lock);
+  }
+  return page;
+}
+
+static void
+evict_page (struct spt_entry *page, void *kpage)
+{
+  switch (page->entry_type) {
+    case FSYS:
+      if (page->writable) {
+        /* This page is not shared by any other processes so we just need to put the page
+          on the swap disk and update our own SPT. */
+        page->entry_type = SWAP;
+        page->swap_slot = swap_out (kpage);
+      } else {
+        /* Read only page. This page could be shared, but we have already removed
+          all owners from the frame and updated their page tables. Also, all SPT
+          will already have all the information to load the page back in if needed
+          so we don't need to do anything here. */
+      }
+      break;
+    case ZEROPAGE:
+      if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr)) {
+        /* The page has been written to, so we need to update our SPT to change the page entry type
+          and also put our page on the swap disk. It is not a shared page as we only share read only pages. */
+        page->entry_type = SWAP;
+        page->swap_slot = swap_out (kpage);
+      } else {
+        /* The page has not been written to and is still a zeropage. It *could* be shared, but
+          this wouldn't matter as if it were, it would be read only and so we know that no other
+          process has written to it. */
+      }
+      break;
+    case SWAP:
+      /* All we need to do here is place the page on the swap disk and update our own SPT entry
+        to provide information on where exactly we place the page within the disk. */
+      page->entry_type = SWAP;
+      page->swap_slot = swap_out (kpage);
+      break;
+  }
+
+  /* The page has now been swapped out, so we must update the in_memory flag our our SPT entry. */
+  page->in_memory = false;
+}
+
 struct frame_table_entry *
 get_frame_by_kpage (void *kpage)
 {
   struct frame_table_entry query = {.kpage = kpage};
+  lock_acquire (&ft_lock);
   struct hash_elem *e = hash_find (&frame_table, &query.frame_hash_elem);
-
+  lock_release (&ft_lock);
   return e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
 }
 
@@ -279,7 +298,6 @@ choose_victim (void)
     }
   return NULL;
 }
-
 
 /* Sets all owner threads for a frame table entry to not accessed. */
 void
