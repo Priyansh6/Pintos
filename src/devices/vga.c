@@ -19,7 +19,7 @@
 static size_t cx, cy;
 
 /* Attribute value for gray text on a black background. */
-#define GRAY_ON_BLACK 0x07
+#define GRAY_ON_BLACK 0x0d
 
 /* Framebuffer.  See [FREEVGA] under "VGA Text Mode Operation".
    The character at (x,y) is fb[y][x][0].

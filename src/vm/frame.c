@@ -14,7 +14,7 @@ static bool frame_less (const struct hash_elem *a, const struct hash_elem *b, vo
 static unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED);
 static void free_frame_elem (struct frame_table_entry *fte);
 static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
-static struct frame_table_entry *choose_victim (void);
+static struct frame_table_entry *choose_victim2 (void);
 static void remove_and_invalidate_owners (struct frame_table_entry *fte);
 static struct spt_entry *prepare_spt_entry_for_eviction (void *uaddr);
 static void evict_page (struct spt_entry *page, void *kpage);
@@ -25,9 +25,9 @@ static struct hash_iterator RR_frame_index;
 void
 frame_table_init (void)
 {
-  hash_init(&frame_table, frame_hash_func, frame_less, NULL);
+  hash_init (&frame_table, frame_hash_func, frame_less, NULL);
   hash_first (&RR_frame_index, &frame_table);
-  lock_init(&ft_lock);
+  lock_init (&ft_lock);
 }
 
 /* Function for hasing the frame_no of a frame_table_enrty. */
@@ -88,7 +88,7 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
       (and put it on the swap disk) to allow us to allocate another page. */
   if (frame_addr == NULL) {
     /* Getting a frame to be evicted. */
-    fte = choose_victim ();
+    fte = choose_victim2 ();
 
     /* Invalidate the page table entries for this frame for all owners. 
        Must be done in a lock to prevent others adding or removing themselves 
@@ -148,6 +148,8 @@ frame_table_free_frame (void *kaddr)
 
   /* Removing page and freeing frame from frame table. */
   hash_delete (&frame_table, e);
+  struct owner *owner = list_entry (list_pop_front (&fte->owners), struct owner, elem);
+  free (owner);
   free_frame_elem (fte);
   lock_release (&ft_lock);
 }
@@ -274,45 +276,22 @@ get_frame_by_kpage (void *kpage)
   return e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
 }
 
-static int frame_to_evict = 0;
-
-/* Iterates through frame_table and chooses frame to evict. */
-static struct frame_table_entry *
-choose_victim (void) 
-{
-  
-  frame_to_evict = frame_to_evict % hash_size (&frame_table);
-  
-  int c = 0;
-  struct hash_iterator i;
-
-  hash_first (&i, &frame_table);
-  while (hash_next (&i))
-    {
-      c++;
-      struct frame_table_entry *f = hash_entry (hash_cur (&i), struct frame_table_entry, frame_hash_elem);
-      if (frame_to_evict == c || c == (int) hash_size (&frame_table)) {
-        frame_to_evict++;
-        return f;
-      }
-    }
-  return NULL;
-}
-
 /* Sets all owner threads for a frame table entry to not accessed. */
-void
+static void
 set_owners_not_accessed (struct frame_table_entry *fte)
 {
   struct list_elem *e;
   for (e = list_begin (&fte->owners); e != list_end (&fte->owners); e = list_next (e))
   {
     struct owner *o = list_entry (e, struct owner, elem);
+    ASSERT (o != NULL);
+
     pagedir_set_accessed(o->thread->pagedir, fte->upage, false);
   }
 }
 
 /* Checks if any owner thread in the frame table has been accessed. */
-bool
+static bool
 any_owner_accessed (struct frame_table_entry *fte)
 {
   struct list_elem *e;
@@ -320,6 +299,8 @@ any_owner_accessed (struct frame_table_entry *fte)
   for (e = list_begin (&fte->owners); e != list_end (&fte->owners); e = list_next (e))
   {
     struct owner *o = list_entry (e, struct owner, elem);
+    ASSERT (o != NULL);
+
     if (pagedir_is_accessed(o->thread->pagedir, fte->upage)) {
       pagedir_set_accessed(o->thread->pagedir, fte->upage, false);
       return true; 
@@ -344,7 +325,7 @@ choose_victim2 (void)
       ASSERT (f != NULL);
 
       /* Check if this frame f has been accessed by any of its owners. If it has been accessed, set the accessed bits to 
-         false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop.  */
+         false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop. */
       if (!any_owner_accessed (f))
         return f;
       set_owners_not_accessed (f);
