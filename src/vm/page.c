@@ -192,18 +192,24 @@ get_and_install_page (struct spt_entry *entry)
 void
 stack_grow (void *fault_addr) 
 {
-  void *kpage = frame_table_get_frame (((uint8_t *) PHYS_BASE) - PGSIZE, PAL_USER | PAL_ZERO);
-  void *upage = pg_round_down (fault_addr);
   struct thread *t = thread_current ();
+  void *stack_bottom = t->stack_bottom;
+  while (stack_bottom > pg_round_down (fault_addr)) {
 
-  if (kpage != NULL) {
-      if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true))
-        return;
-      else
+    void *upage = stack_bottom - PGSIZE;
+    void *kpage = frame_table_get_frame (upage, PAL_USER | PAL_ZERO);
+
+    if (kpage != NULL) {
+        if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true)) {
+          stack_bottom -= PGSIZE;
+        } else {
+          exit_failure ();
+        }
+    } else {
         exit_failure ();
-  } else {
-      exit_failure ();
+    }
   }
+  t->stack_bottom = stack_bottom;
 }
 
 /* Returns the supplemental page table entry given by uaddr. */

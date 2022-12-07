@@ -120,7 +120,7 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
         if (page == NULL)
           PANIC ("no idea what to do here tbh");
 
-        page->uaddr = upage;
+        page->uaddr = fte->upage;
         page->entry_type = SWAP;
         page->writable = true;
 
@@ -255,30 +255,30 @@ get_frame_by_kpage (void *kpage)
   return e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
 }
 
-// static int frame_to_evict = 0;
+static int frame_to_evict = 0;
 
-// /* Iterates through frame_table and chooses frame to evict. */
-// static struct frame_table_entry *
-// choose_victim (void) 
-// {
+/* Iterates through frame_table and chooses frame to evict. */
+static struct frame_table_entry *
+choose_victim (void) 
+{
   
-//   frame_to_evict = frame_to_evict % hash_size (&frame_table);
+  frame_to_evict = frame_to_evict % hash_size (&frame_table);
   
-//   int c = 0;
-//   struct hash_iterator i;
+  int c = 0;
+  struct hash_iterator i;
 
-//   hash_first (&i, &frame_table);
-//   while (hash_next (&i))
-//     {
-//       c++;
-//       struct frame_table_entry *f = hash_entry (hash_cur (&i), struct frame_table_entry, frame_hash_elem);
-//       if (frame_to_evict == c || c == (int) hash_size (&frame_table)) {
-//         frame_to_evict++;
-//         return f;
-//       }
-//     }
-//   return NULL;
-// }
+  hash_first (&i, &frame_table);
+  while (hash_next (&i))
+    {
+      c++;
+      struct frame_table_entry *f = hash_entry (hash_cur (&i), struct frame_table_entry, frame_hash_elem);
+      if (frame_to_evict == c || c == (int) hash_size (&frame_table)) {
+        frame_to_evict++;
+        return f;
+      }
+    }
+  return NULL;
+}
 
 
 /* Sets all owner threads for a frame table entry to not accessed. */
@@ -313,7 +313,7 @@ any_owner_accessed (struct frame_table_entry *fte)
 
 /* Second Chance Algorithm for finding a frame to evict. */
 static struct frame_table_entry *
-choose_victim (void) 
+choose_victim2 (void) 
 {
   /* Infinitely looping until we find a frame to evict. */
   while (true)

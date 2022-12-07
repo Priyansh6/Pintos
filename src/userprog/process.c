@@ -828,11 +828,14 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = frame_table_get_frame (((uint8_t *) PHYS_BASE) - PGSIZE, PAL_USER | PAL_ZERO);
+  void *stack_pointer = ((uint8_t *) PHYS_BASE) - PGSIZE;
+
+  kpage = frame_table_get_frame (stack_pointer, PAL_USER | PAL_ZERO);
+  thread_current ()->stack_bottom = stack_pointer;
 
   if (kpage != NULL) 
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      success = install_page (stack_pointer, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else

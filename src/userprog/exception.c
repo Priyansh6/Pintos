@@ -174,5 +174,7 @@ page_fault (struct intr_frame *f)
 static bool
 is_stack_access (void *fault_addr, void *esp)
 {
-   return fault_addr == esp || fault_addr + 4 == esp || fault_addr + 32 == esp;
+   return (fault_addr >= (PHYS_BASE - MAX_USER_STACK_SIZE) && fault_addr <= thread_current ()->stack_bottom)
+            || fault_addr + 4 == esp 
+            || fault_addr + 32 == esp;
 }
