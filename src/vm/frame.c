@@ -8,6 +8,7 @@
 #include "vm/frame.h"
 #include "vm/page.h"
 #include "vm/share.h"
+#include "threads/interrupt.h"
 
 static struct hash frame_table;          /* Hash to store all the frame_table_entries. */
 static bool frame_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
@@ -15,18 +16,16 @@ static unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED)
 static void free_frame_elem (struct frame_table_entry *fte);
 static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
 static struct frame_table_entry *choose_victim (void);
+static struct frame_table_entry *choose_victim_random (void);
 static void remove_and_invalidate_owners (struct frame_table_entry *fte);
 static struct spt_entry *prepare_spt_entry_for_eviction (void *uaddr);
 static void evict_page (struct spt_entry *page, void *kpage);
-
-static struct hash_iterator RR_frame_index;
 
 /* Initialises the frame table. */
 void
 frame_table_init (void)
 {
   hash_init(&frame_table, frame_hash_func, frame_less, NULL);
-  hash_first (&RR_frame_index, &frame_table);
   lock_init(&ft_lock);
 }
 
@@ -53,7 +52,7 @@ static void
 free_frame_elem (struct frame_table_entry *fte)
 {
   palloc_free_page (fte->kpage);
-  free(fte);
+  free (fte);
 }
 
 /* Auxilliary function for freeing frame table at shutdown. */
@@ -101,7 +100,7 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
 
     /* Evict the page. */
     evict_page (page, fte->kpage);
-    
+
   } else {
     /* Creating new frame table entry on the heap. */
     fte = (struct frame_table_entry *) malloc (sizeof (struct frame_table_entry));
@@ -116,7 +115,12 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
 
   /* Set the user address which points to the frame. */
   fte->upage = upage;
-  
+
+  /* Clear the owners list */
+  while (!list_empty (&fte->owners)) {
+    free (list_entry (list_pop_front (&fte->owners), struct owner, elem));
+  }
+
   /* Add ourselves as an owner of the frame. */
   struct owner *owner = (struct owner *) malloc (sizeof (struct owner));
   ASSERT (owner != NULL);
@@ -136,18 +140,17 @@ frame_table_free_frame (void *kaddr)
   struct frame_table_entry query = {.kpage = kaddr};
   struct hash_elem *e = hash_find (&frame_table, &query.frame_hash_elem);
   struct frame_table_entry *fte = e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
-  //lock_acquire (&fte->fte_lock);
 
   if (free_shared_page (fte)) {
-    //lock_release (&fte->fte_lock);
     lock_release (&ft_lock);
     return;
   }
 
-  //lock_release (&fte->fte_lock);
-
   /* Removing page and freeing frame from frame table. */
   hash_delete (&frame_table, e);
+  while (!list_empty (&fte->owners)) {
+    free (list_entry (list_pop_front (&fte->owners), struct owner, elem));
+  }
   free_frame_elem (fte);
   lock_release (&ft_lock);
 }
@@ -215,13 +218,16 @@ prepare_spt_entry_for_eviction (void *uaddr)
     struct shared_file *s_file = get_shared_file (file_get_inode (page->file));
     struct shared_file_page *s_page = get_shared_page (s_file, page->ofs);
 
-    hash_delete (&s_file->shared_pages_table, &s_page->elem);
-    free (s_page);
+    if (s_file != NULL && s_page != NULL) {
+      hash_delete (&s_file->shared_pages_table, &s_page->elem);
+      free (s_page);
+    }
 
     lock_release (&shared_table_lock);
   }
   return page;
 }
+
 
 static void
 evict_page (struct spt_entry *page, void *kpage)
@@ -278,7 +284,7 @@ static int frame_to_evict = 0;
 
 /* Iterates through frame_table and chooses frame to evict. */
 static struct frame_table_entry *
-choose_victim (void) 
+choose_victim_random (void) 
 {
   
   frame_to_evict = frame_to_evict % hash_size (&frame_table);
@@ -320,19 +326,26 @@ any_owner_accessed (struct frame_table_entry *fte)
   for (e = list_begin (&fte->owners); e != list_end (&fte->owners); e = list_next (e))
   {
     struct owner *o = list_entry (e, struct owner, elem);
+
     if (pagedir_is_accessed(o->thread->pagedir, fte->upage)) {
       pagedir_set_accessed(o->thread->pagedir, fte->upage, false);
       return true; 
     }
-  }
+  }   
 
   return false;
 }
 
+static struct hash_iterator RR_frame_index;
+
 /* Second Chance Algorithm for finding a frame to evict. */
 static struct frame_table_entry *
-choose_victim2 (void) 
+choose_victim (void) 
 {
+
+  if (RR_frame_index.hash == NULL)
+    hash_first (&RR_frame_index, &frame_table);
+
   /* Infinitely looping until we find a frame to evict. */
   while (true)
     {
@@ -345,11 +358,17 @@ choose_victim2 (void)
 
       /* Check if this frame f has been accessed by any of its owners. If it has been accessed, set the accessed bits to 
          false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop.  */
-      if (!any_owner_accessed (f))
+      if (!pagedir_is_accessed (thread_current ()->pagedir, f->upage)) {
         return f;
-      set_owners_not_accessed (f);
+      }
+      pagedir_set_accessed (thread_current ()->pagedir, f->upage, false);
+
+      // if (!any_owner_accessed (f))
+      //    return f;
+      // set_owners_not_accessed (f);
     }
   
   /* Should never get here. */
+  NOT_REACHED ();
   return NULL;
 }

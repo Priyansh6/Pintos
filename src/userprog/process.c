@@ -476,9 +476,11 @@ process_exit (void)
   struct process_control_block *parent_pcb = process_get_pcb ()->parent_pcb;
 
   /* Allow any parent process waiting on our process to continue. */
+  enum intr_level old_level = intr_disable ();
   sema_up (&pcb->wait_sema);
   if (parent_pcb == NULL || parent_pcb->has_exited)
     free (pcb);
+  intr_set_level (old_level);
     
 }
 

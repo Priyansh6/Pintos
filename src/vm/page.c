@@ -164,9 +164,12 @@ get_and_install_page (struct spt_entry *entry)
   
     /* Get a new page of memory. */
     kpage = frame_table_get_frame (entry->uaddr, PAL_USER);
-  
-    if (kpage == NULL)
+
+    struct frame_table_entry *fte = get_frame_by_kpage (kpage);
+
+    if (kpage == NULL) {
       return NULL;
+    }
   
     /* Add the page to the process's address space. */
     if (pagedir_get_page (t->pagedir, entry->uaddr) != NULL
