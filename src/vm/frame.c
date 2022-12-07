@@ -16,11 +16,14 @@ static void free_frame_elem (struct frame_table_entry *fte);
 static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
 static struct frame_table_entry *choose_victim (void);
 
+static struct hash_iterator RR_frame_index;
+
 /* Initialises the frame table. */
 void
 frame_table_init (void)
 {
   hash_init(&frame_table, frame_hash_func, frame_less, NULL);
+  hash_first (&RR_frame_index, &frame_table);
   lock_init(&ft_lock);
 }
 
@@ -81,70 +84,130 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
   /* If we can't allocate any more pages, we need to choose a page to evict
       (and put it on the swap disk) to allow us to allocate another page. */
   if (frame_addr == NULL) {
-    ASSERT (false);
     /* Getting a frame to be evicted. */
     fte = choose_victim ();
-    
-    ASSERT (fte != NULL);
+    lock_acquire (&fte->fte_lock);
 
-    //lock_acquire (&fte->fte_lock);
-    //lock_release (&ft_lock);
+    ASSERT (fte != NULL);
+    ASSERT (fte->upage != NULL);
 
     /* Invalidate the page table entries for this frame for all owners. 
        Must be done in a lock to prevent others adding or removing themselves 
        mid-eviction. */
     struct list_elem *e;
-    for (e = list_begin (&fte->owners); e != list_end (&fte->owners); e = list_next (e)) {
+    for (e = list_begin (&fte->owners); e != list_end (&fte->owners); ) {
         struct owner *o = list_entry (e, struct owner, elem);
         ASSERT (o != NULL);
+
+        /* Clear the owners page table entry that points to this frame. */
         pagedir_clear_page (o->thread->pagedir, fte->upage);
-
-        /* Move page into swap or filesys depending on spt type. */
-        struct spt_entry spt_query = {.uaddr = fte->upage};
-        struct hash_elem *he = hash_find (&o->thread->spt, &spt_query.spt_hash_elem);
-
-        struct spt_entry *spt = hash_entry (he, struct spt_entry, spt_hash_elem);
-        ASSERT (spt != NULL);
-        ASSERT (spt->in_memory);
-        switch (spt->entry_type) {
-          case ZEROPAGE:
-          case FSYS:
-            if (pagedir_is_dirty (o->thread->pagedir, spt->uaddr)) {
-              spt->entry_type = SWAP;
-            } else {
-              break;
-            }
-          case SWAP:
-            spt->swap_slot = swap_out (fte->kpage); // we should only do this for the first thing - otherwise we just copy the swap slot to spt entries
-            break;
-        }
-
-        spt->in_memory = false;
 
         /* Remove owners from list. */
         list_remove (e);
+
+        /* Before we free the owner, get the next list elem. */
+        e = list_next (e);
+        free (o);
     }
+
+    /* Get the spage table entry. */
+    struct spt_entry *page = get_spt_entry_by_uaddr (fte->upage);
+
+    /* If we don't have a spage table entry (i.e stack page) then we create one. */
+    if (page == NULL) {
+        page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+
+        if (page == NULL)
+          PANIC ("no idea what to do here tbh");
+
+        page->uaddr = upage;
+        page->entry_type = SWAP;
+        page->writable = true;
+
+        hash_insert (&thread_current ()->spt, &page->spt_hash_elem);
+    }
+
+    /* Remove the page from the shared table. */
+    if (!page->writable) {
+      lock_acquire (&shared_table_lock);
+
+      struct shared_file *s_file = get_shared_file (file_get_inode (page->file));
+      struct shared_file_page *s_page = get_shared_page (s_file, page->ofs);
+
+      hash_delete (&s_file->shared_pages_table, &s_page->elem);
+      free (s_page);
+
+      lock_release (&shared_table_lock);
+    }
+
+    switch (page->entry_type) {
+      case FSYS:
+        if (page->writable) {
+          /* This page is not shared by any other processes so we just need to put the page
+             on the swap disk and update our own SPT. */
+          page->file = NULL;
+          page->ofs = NULL;
+          page->read_bytes = NULL;
+          page->zero_bytes = NULL;
+
+          page->entry_type = SWAP;
+          page->swap_slot = swap_out (fte->kpage);
+        } else {
+          /* Read only page. This page could be shared, but we have already removed
+             all owners from the frame and updated their page tables. Also, all SPT
+             will already have all the information to load the page back in if needed
+             so we don't need to do anything here. */
+        }
+        break;
+      case ZEROPAGE:
+        if (pagedir_is_dirty (thread_current ()->pagedir, page->uaddr)) {
+          /* The page has been written to, so we need to update our SPT to change the page entry type
+             and also put our page on the swap disk. It is not a shared page as we only share read only pages. */
+          page->entry_type = SWAP;
+          page->swap_slot = swap_out (fte->kpage);
+        } else {
+          /* The page has not been written to and is still a zeropage. It *could* be shared, but
+             this wouldn't matter as if it were, it would be read only and so we know that no other
+             process has written to it. */
+        }
+        break;
+      case SWAP:
+        /* All we need to do here is place the page on the swap disk and update our own SPT entry
+           to provide information on where exactly we place the page within the disk. */
+        page->entry_type = SWAP;
+        page->swap_slot = swap_out (fte->kpage);
+        break;
+    }
+
+    /* The page has now been swapped out, so we must update the in_memory flag our our SPT entry. */
+    page->in_memory = false;
     
-    //lock_release (&fte->fte_lock);
+    ASSERT (list_size (&fte->owners) == 0);
+
+    lock_release (&fte->fte_lock);
   } else {
-    /* Inserting new page into frame table. */
     /* Creating new frame table entry on the heap. */
     fte = (struct frame_table_entry *) malloc (sizeof (struct frame_table_entry));
     ASSERT (fte != NULL);
+
+    /* Inserting new page into frame table. */
+    fte->kpage = frame_addr;
     hash_insert (&frame_table, &fte->frame_hash_elem);
     list_init (&fte->owners);
+    lock_init (&fte->fte_lock);
   }
 
+  /* Set the user address which points to the frame. */
   fte->upage = upage;
-  fte->kpage = frame_addr;
-
+  
+  /* Add ourselves as an owner of the frame. */
   struct owner *owner = (struct owner *) malloc (sizeof (struct owner));
   ASSERT (owner != NULL);
   owner->thread = thread_current ();
   list_push_back (&fte->owners, &owner->elem);
 
   lock_release (&ft_lock);
-  return frame_addr;
+  return fte->kpage;
 }
 
 /* Frees the page at a particular frame. */
@@ -192,33 +255,45 @@ get_frame_by_kpage (void *kpage)
   return e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
 }
 
-static int frame_to_evict = 0;
+// static int frame_to_evict = 0;
 
-/* Iterates through frame_table and chooses frame to evict. */
-static struct frame_table_entry *
-choose_victim (void) 
+// /* Iterates through frame_table and chooses frame to evict. */
+// static struct frame_table_entry *
+// choose_victim (void) 
+// {
+  
+//   frame_to_evict = frame_to_evict % hash_size (&frame_table);
+  
+//   int c = 0;
+//   struct hash_iterator i;
+
+//   hash_first (&i, &frame_table);
+//   while (hash_next (&i))
+//     {
+//       c++;
+//       struct frame_table_entry *f = hash_entry (hash_cur (&i), struct frame_table_entry, frame_hash_elem);
+//       if (frame_to_evict == c || c == (int) hash_size (&frame_table)) {
+//         frame_to_evict++;
+//         return f;
+//       }
+//     }
+//   return NULL;
+// }
+
+
+/* Sets all owner threads for a frame table entry to not accessed. */
+void
+set_owners_not_accessed (struct frame_table_entry *fte)
 {
-  
-  frame_to_evict = frame_to_evict % hash_size (&frame_table);
-  
-  int c = 0;
-  struct hash_iterator i;
-
-  hash_first (&i, &frame_table);
-  while (hash_next (&i))
-    {
-      c++;
-      struct frame_table_entry *f = hash_entry (hash_cur (&i), struct frame_table_entry, frame_hash_elem);
-      if (frame_to_evict == c || c == (int) hash_size (&frame_table)) {
-        frame_to_evict++;
-        return f;
-      }
-    }
-  return NULL;
+  struct list_elem *e;
+  for (e = list_begin (&fte->owners); e != list_end (&fte->owners); e = list_next (e))
+  {
+    struct owner *o = list_entry (e, struct owner, elem);
+    pagedir_set_accessed(o->thread->pagedir, fte->upage, false);
+  }
 }
 
-
-
+/* Checks if any owner thread in the frame table has been accessed. */
 bool
 any_owner_accessed (struct frame_table_entry *fte)
 {
@@ -236,19 +311,27 @@ any_owner_accessed (struct frame_table_entry *fte)
   return false;
 }
 
-static struct hash_iterator RR_frame_index;
-
+/* Second Chance Algorithm for finding a frame to evict. */
 static struct frame_table_entry *
-choose_victim2 (void) 
+choose_victim (void) 
 {
-  //initial implementation of Second Change algorithm
-  hash_first (&RR_frame_index, &frame_table);
-
-  while (hash_next (&RR_frame_index))
+  /* Infinitely looping until we find a frame to evict. */
+  while (true)
     {
+      /* If we are at the end of the frame table and we havent found a frame to evict, loop back to the start. */
+      if (hash_next (&RR_frame_index) == NULL)
+        hash_first (&RR_frame_index, &frame_table); 
+
       struct frame_table_entry *f = hash_entry (hash_cur (&RR_frame_index), struct frame_table_entry, frame_hash_elem);
-      if (!any_owner_accessed(f))
+      ASSERT (f != NULL);
+
+      /* Check if this frame f has been accessed by any of its owners. If it has been accessed, set the accessed bits to 
+         false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop.  */
+      if (!any_owner_accessed (f))
         return f;
+      set_owners_not_accessed (f);
     }
+  
+  /* Should never get here. */
   return NULL;
 }
