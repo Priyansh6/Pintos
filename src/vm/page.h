@@ -23,17 +23,14 @@ struct spt_entry
                                         FSYS (if a page is held in the filesystem), or ZEROPAGE (since
                                         zero pages should only be loaded into a frame just before they are written to).*/
     bool writable;
-    union
+    struct
     {
-        struct
-        {
-            struct file *file;
-            off_t ofs;
-            uint32_t read_bytes;
-            uint32_t zero_bytes;
-        };
-        size_t swap_slot;
+        struct file *file;
+        off_t ofs;
+        uint32_t read_bytes;
+        uint32_t zero_bytes;
     };
+    size_t swap_slot;
     struct hash_elem spt_hash_elem;
 };
 
