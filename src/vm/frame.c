@@ -88,6 +88,7 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
   if (frame_addr == NULL) {
     /* Getting a frame to be evicted. */
     fte = choose_victim ();
+    fte->pinned = true;
 
     /* Invalidate the page table entries for this frame for all owners. 
        Must be done in a lock to prevent others adding or removing themselves 
@@ -126,7 +127,7 @@ frame_table_get_frame (void *upage, enum palloc_flags flags)
   ASSERT (owner != NULL);
   owner->thread = thread_current ();
   list_push_back (&fte->owners, &owner->elem);
-
+  fte->pinned = false;
   lock_release (&ft_lock);
   return fte->kpage;
 }
@@ -148,13 +149,18 @@ frame_table_free_frame (void *kaddr)
 
   /* Removing page and freeing frame from frame table. */
   hash_delete (&frame_table, e);
+
+  /* Free all owners of the page. */
   while (!list_empty (&fte->owners)) {
     free (list_entry (list_pop_front (&fte->owners), struct owner, elem));
   }
+
   free_frame_elem (fte);
   lock_release (&ft_lock);
 }
 
+/* Iterates through frame owners list to find the owner struct that
+   corresponds to the current thread. */
 struct owner *
 find_owner (struct list *owners)
 {
@@ -202,7 +208,7 @@ prepare_spt_entry_for_eviction (void *uaddr)
     page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
 
     if (page == NULL)
-      PANIC ("no idea what to do here tbh");
+      PANIC ("Out of memory");
 
     page->uaddr = uaddr;
     page->entry_type = SWAP;
@@ -228,7 +234,8 @@ prepare_spt_entry_for_eviction (void *uaddr)
   return page;
 }
 
-
+/* Evicts a page and updates the necessary supplemental page table entries to bring the page
+   back in from swap if necessary. */
 static void
 evict_page (struct spt_entry *page, void *kpage)
 {
@@ -270,6 +277,7 @@ evict_page (struct spt_entry *page, void *kpage)
   page->in_memory = false;
 }
 
+/* Finds and returns the frame given by a particular kernel virtual address (must be a multiple of a page). */
 struct frame_table_entry *
 get_frame_by_kpage (void *kpage)
 {
@@ -358,7 +366,7 @@ choose_victim (void)
 
       /* Check if this frame f has been accessed by any of its owners. If it has been accessed, set the accessed bits to 
          false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop.  */
-      if (!pagedir_is_accessed (thread_current ()->pagedir, f->upage)) {
+      if (!f->pinned && !pagedir_is_accessed (thread_current ()->pagedir, f->upage)) {
         return f;
       }
       pagedir_set_accessed (thread_current ()->pagedir, f->upage, false);

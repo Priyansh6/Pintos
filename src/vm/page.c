@@ -165,19 +165,23 @@ get_and_install_page (struct spt_entry *entry)
     /* Get a new page of memory. */
     kpage = frame_table_get_frame (entry->uaddr, PAL_USER);
 
-    struct frame_table_entry *fte = get_frame_by_kpage (kpage);
-
     if (kpage == NULL) {
       return NULL;
     }
-  
+
+    struct frame_table_entry *fte = get_frame_by_kpage (kpage);
+    fte->pinned = true;
+
     /* Add the page to the process's address space. */
     if (pagedir_get_page (t->pagedir, entry->uaddr) != NULL
         || !pagedir_set_page (t->pagedir, entry->uaddr, kpage, entry->writable))
     {
+      fte->pinned = false;
       frame_table_free_frame (kpage);
       return NULL; 
     }
+
+    fte->pinned = false;
 
   } else {
     /* Check if writable flag for the page should be updated */
@@ -185,6 +189,8 @@ get_and_install_page (struct spt_entry *entry)
       pagedir_set_writable(t->pagedir, entry->uaddr, entry->writable); 
     }
   }
+
+  
 
   return kpage;
 }
