@@ -104,7 +104,7 @@ inode_less_func (const struct hash_elem *a, const struct hash_elem *b, void *aux
   struct shared_file *file_a = hash_entry (a, struct shared_file, elem);
   struct shared_file *file_b = hash_entry (b, struct shared_file, elem);
 
-  return ((int) file_a->file_inode) < ((int) file_b->file_inode);
+  return ((int) &file_a->shared_pages_table) < ((int) &file_b->shared_pages_table);
 }
 
 /* Hashing function for a shared_file_page table entry. */
@@ -122,7 +122,7 @@ offset_less_func (const struct hash_elem *a, const struct hash_elem *b, void *au
   struct shared_file_page *page_a = hash_entry (a, struct shared_file_page, elem);
   struct shared_file_page *page_b = hash_entry (b, struct shared_file_page, elem);
 
-  return ((int) page_a->page_offset) < ((int) page_b->page_offset);
+  return ((int) &page_a->frame_entry) < ((int) &page_b->frame_entry);
 }
 
 /* Auxilliary function for freeing shared table. */
