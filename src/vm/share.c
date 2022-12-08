@@ -62,7 +62,6 @@ insert_shared_page (struct inode *file_inode, uint32_t page_offset, void *kpage)
     }
 
     shared_file->file_inode = file_inode;
-    shared_file->num_sharers = 1;
     hash_init (&shared_file->shared_pages_table, &offset_hash_func, &offset_less_func, NULL);
 
     if (hash_insert (&shared_file_table, &shared_file->elem)) {

@@ -9,15 +9,14 @@
 struct lock shared_table_lock;
 
 struct shared_file {
-    struct inode *file_inode;
-    uint32_t num_sharers;
-    struct hash shared_pages_table;
+    struct inode *file_inode;                   /* Pointer to the shared file inode. (Key) */
+    struct hash shared_pages_table;             /* Shared pages hash map. */
     struct hash_elem elem;
 };
 
 struct shared_file_page {
-    uint32_t page_offset;
-    struct frame_table_entry *frame_entry;
+    uint32_t page_offset;                       /* Offset of page within the shared file (Key) */
+    struct frame_table_entry *frame_entry;      /* Pointer to the frame currently loaded in to memory. */
     struct hash_elem elem;
 };
 
