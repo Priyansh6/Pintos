@@ -30,7 +30,7 @@ mmap_create (int fd, void *uaddr)
         pages (including lazy loaded executables). */
     for (int i = 0; i < n_pages; i++) {
         struct spt_entry spt;
-        spt.uaddr = uaddr;
+        spt.uaddr = uaddr + i * PGSIZE;
 
         struct hash_elem *e = hash_find (&thread_current ()->spt, &spt.spt_hash_elem);
         if (e != NULL)
@@ -54,10 +54,11 @@ mmap_create (int fd, void *uaddr)
             process_file_set_mapping (pfile, page);
         }
 
-        page->writable = true; // this seems okay for now, maybe we will need to make this dependent on a file's deny_write field
+        /* Create new supplemental page table entry for this page of the file. */
+        page->writable = true; 
         page->uaddr = uaddr + PGSIZE * i;
-        page->entry_type = MMAP;
-        page->file = file_reopen (file); // Not sure if we should just file reopen once (don't think we should)
+        page->entry_type = FSYS;
+        page->file = file_reopen (file); 
         page->ofs = PGSIZE * i;
 
         uint32_t map_bytes = left_to_map < PGSIZE ? left_to_map : PGSIZE;
