@@ -16,10 +16,13 @@ static unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED)
 static void free_frame_elem (struct frame_table_entry *fte);
 static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
 static struct frame_table_entry *choose_victim (void);
-static struct frame_table_entry *choose_victim_random (void);
 static void remove_and_invalidate_owners (struct frame_table_entry *fte);
 static struct spt_entry *prepare_spt_entry_for_eviction (void *uaddr);
 static void evict_page (struct spt_entry *page, void *kpage);
+
+static bool any_owner_accessed (struct frame_table_entry *fte);
+static void set_owners_not_accessed (struct frame_table_entry *fte);
+
 
 /* Initialises the frame table. */
 void
@@ -312,21 +315,23 @@ choose_victim_random (void)
     }
   return NULL;
 }
-
 /* Sets all owner threads for a frame table entry to not accessed. */
-void
+static void
 set_owners_not_accessed (struct frame_table_entry *fte)
 {
   struct list_elem *e;
+
   for (e = list_begin (&fte->owners); e != list_end (&fte->owners); e = list_next (e))
   {
     struct owner *o = list_entry (e, struct owner, elem);
+    //printf("accessed before: %d\n", pagedir_is_accessed(o->thread->pagedir, fte->upage));
     pagedir_set_accessed(o->thread->pagedir, fte->upage, false);
+    //printf("accessed after: %d\n", pagedir_is_accessed(o->thread->pagedir, fte->upage));
   }
 }
 
 /* Checks if any owner thread in the frame table has been accessed. */
-bool
+static bool
 any_owner_accessed (struct frame_table_entry *fte)
 {
   struct list_elem *e;
@@ -336,46 +341,50 @@ any_owner_accessed (struct frame_table_entry *fte)
     struct owner *o = list_entry (e, struct owner, elem);
 
     if (pagedir_is_accessed(o->thread->pagedir, fte->upage)) {
-      pagedir_set_accessed(o->thread->pagedir, fte->upage, false);
-      return true; 
+      //printf("owner has been accessed\n");
+      return true;
     }
-  }   
+  }
 
+  //printf("owner has NOT been accessed\n");
   return false;
 }
-
-static struct hash_iterator RR_frame_index;
 
 /* Second Chance Algorithm for finding a frame to evict. */
 static struct frame_table_entry *
 choose_victim (void) 
 {
+  while (true) {
+    struct hash_iterator RR_frame_index;
 
-  if (RR_frame_index.hash == NULL)
+    bool everything_pinned = true;
+
+    /* Setting the hash iterator to the beginning of the hash table when the iterator has not been initialised. */
     hash_first (&RR_frame_index, &frame_table);
-
-  /* Infinitely looping until we find a frame to evict. */
-  while (true)
+    /* Infinitely looping until we find a frame to evict. */
+    while (hash_next (&RR_frame_index))
     {
       /* If we are at the end of the frame table and we havent found a frame to evict, loop back to the start. */
-      if (hash_next (&RR_frame_index) == NULL)
-        hash_first (&RR_frame_index, &frame_table); 
+
 
       struct frame_table_entry *f = hash_entry (hash_cur (&RR_frame_index), struct frame_table_entry, frame_hash_elem);
-      ASSERT (f != NULL);
 
       /* Check if this frame f has been accessed by any of its owners. If it has been accessed, set the accessed bits to 
-         false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop.  */
-      if (!f->pinned && !pagedir_is_accessed (thread_current ()->pagedir, f->upage)) {
+        false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop.  */
+      if (!any_owner_accessed(f) && !f->pinned) {
         return f;
       }
-      pagedir_set_accessed (thread_current ()->pagedir, f->upage, false);
-
-      // if (!any_owner_accessed (f))
-      //    return f;
-      // set_owners_not_accessed (f);
+      set_owners_not_accessed(f);
+      everything_pinned &= f->pinned; 
+    }
+    if (everything_pinned) {
+      lock_release(&ft_lock);
+      thread_yield();
+      lock_acquire(&ft_lock);
     }
   
+  }
+
   /* Should never get here. */
   NOT_REACHED ();
   return NULL;
