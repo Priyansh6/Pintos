@@ -12,6 +12,7 @@
 #include "devices/input.h"
 #include "devices/serial.h"
 #include "devices/shutdown.h"
+#include "devices/swap.h"
 #include "devices/timer.h"
 #include "devices/vga.h"
 #include "devices/rtc.h"
@@ -31,11 +32,18 @@
 #else
 #include "tests/threads/tests.h"
 #endif
+#ifdef VM
+#include "devices/swap.h"
+#endif
 #ifdef FILESYS
 #include "devices/block.h"
 #include "devices/ide.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
+#endif
+#ifdef VM
+#include "vm/frame.h"
+#include "vm/share.h"
 #endif
 
 /* Page directory with kernel mappings only. */
@@ -98,6 +106,10 @@ main (void)
   palloc_init (user_page_limit);
   malloc_init ();
   paging_init ();
+  #ifdef VM
+  frame_table_init ();
+  init_shared_file_table ();
+  #endif
 
   /* Segmentation. */
 #ifdef USERPROG
@@ -127,6 +139,11 @@ main (void)
   filesys_init (format_filesys);
 #endif
 
+#ifdef VM
+  /* Initialise the swap disk */  
+  swap_init ();
+#endif
+
   printf ("Boot complete.\n");
   
   /* Run actions specified on kernel command line. */
@@ -136,6 +153,10 @@ main (void)
   #ifdef USERPROG
   process_destroy_files ();
   free (thread_current()->pcb);
+  #endif
+  #ifdef VM
+  free_frame_table ();
+  free_shared_table ();
   #endif
   shutdown ();
   thread_exit ();

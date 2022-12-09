@@ -21,6 +21,9 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
+#include "vm/frame.h"
+#include "vm/mmap.h"
+#include "vm/page.h"
 
 #define MAX_NUM_OF_CMD_LINE_ARGS 256
 #define PUSH_STACK(type, pointer, value) pointer = ((type*) pointer) - 1; (*((type*) pointer) = (type) (value))
@@ -38,6 +41,7 @@ static void process_file_close (struct process_control_block *pcb, struct proces
 
 static bool fd_less (const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED);
 static unsigned process_file_hash (const struct hash_elem *elem, void *aux UNUSED);
+static void process_mmap_writeback (struct hash_elem *e, void *aux UNUSED);
 
 static bool is_stack_overflow (uint32_t *bytes_written, uint32_t bytes_to_write);
 
@@ -70,6 +74,7 @@ struct process_control_block {
 struct process_file {
   int fd;                         /* Stores the file descriptor for this file in a process. */
   struct file *file;              /* Stores pointer to associated file */
+  struct spt_entry *mapping;      /* Store a reference to the first spt entry for an opened file if it is mapped. */
 
   struct hash_elem hash_elem;     /* Enables process_file to be in files list of process_control_block. */
 };
@@ -142,11 +147,25 @@ pcb_get_child_by_tid (tid_t child_tid) {
 static void
 process_file_close (struct process_control_block *pcb, struct process_file *pfile)
 {
-  hash_delete (&pcb->files, &pfile->hash_elem);
-  lock_acquire (&fs_lock);
-  file_close (pfile->file);
-  lock_release (&fs_lock);
-  free (pfile);
+  if (pfile->mapping == NULL) {
+    hash_delete (&pcb->files, &pfile->hash_elem);
+
+    lock_acquire (&fs_lock);
+    file_close (pfile->file);
+    lock_release (&fs_lock);
+
+    free (pfile);
+  }
+}
+
+static void
+process_mmap_writeback (struct hash_elem *e, void *aux UNUSED)
+{
+  struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
+
+  /* Write back any changes to mapped files. */
+  if (pfile->mapping != NULL)
+    mmap_writeback (pfile);
 }
 
 /* Executes process_file_close on process_file associated with hash_elem e */
@@ -154,7 +173,9 @@ static void
 process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
 {
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
+  bool should_release = reentrant_lock_acquire (&fs_lock);
   file_close (pfile->file);
+  reentrant_lock_release (&fs_lock, should_release);
   free (pfile);
 }
 
@@ -404,8 +425,28 @@ process_exit (void)
   uint32_t *pd;
 
   /* Gets our own PCB. */
-
   struct process_control_block *pcb = process_get_pcb ();
+  hash_apply (&pcb->files, &process_mmap_writeback);
+
+  /* Destroy the current process's page directory and switch back
+     to the kernel-only page directory. */
+  pd = cur->pagedir;
+  if (pd != NULL) 
+    {
+      /* Correct ordering here is crucial.  We must set
+         cur->pagedir to NULL before switching page directories,
+         so that a timer interrupt can't switch back to the
+         process page directory.  We must activate the base page
+         directory before destroying the process's page
+         directory, or our active page directory will be one
+         that's been freed (and cleared). */
+      cur->pagedir = NULL;
+      pagedir_activate (NULL);
+      pagedir_destroy (pd);
+    }
+
+
+  destroy_spt ();
 
   /* Close all files open by the current process and remove all
      files from our PCB's file list. Also handles re-allowing writes
@@ -435,30 +476,11 @@ process_exit (void)
   struct process_control_block *parent_pcb = process_get_pcb ()->parent_pcb;
 
   /* Allow any parent process waiting on our process to continue. */
+  enum intr_level old_level = intr_disable ();
   sema_up (&pcb->wait_sema);
   if (parent_pcb == NULL || parent_pcb->has_exited)
     free (pcb);
-
-  /* Mark our process as having exited, so our parent and children know (needed when they exit to ensure
-     all PCBs are freed).*/
-  pcb->has_exited = true;
-
-  /* Destroy the current process's page directory and switch back
-     to the kernel-only page directory. */
-  pd = cur->pagedir;
-  if (pd != NULL) 
-    {
-      /* Correct ordering here is crucial.  We must set
-         cur->pagedir to NULL before switching page directories,
-         so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
-         directory before destroying the process's page
-         directory, or our active page directory will be one
-         that's been freed (and cleared). */
-      cur->pagedir = NULL;
-      pagedir_activate (NULL);
-      pagedir_destroy (pd);
-    }
+  intr_set_level (old_level);
     
 }
 
@@ -755,43 +777,46 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
       
-      /* Check if virtual page already allocated */
-      struct thread *t = thread_current ();
-      uint8_t *kpage = pagedir_get_page (t->pagedir, upage);
-      
-      if (kpage == NULL){
-        
-        /* Get a new page of memory. */
-        kpage = palloc_get_page (PAL_USER);
-        if (kpage == NULL){
+      struct spt_entry query;
+      struct spt_entry *page;
+      struct hash_elem *e;
+
+      query.uaddr = upage;
+      e = hash_find (&thread_current()->spt, &query.spt_hash_elem);
+      page = (e != NULL) ? hash_entry (e, struct spt_entry, spt_hash_elem) : NULL;
+
+
+      if (page == NULL) {
+        /* If we have a new entry to the spt, its writable status is set to the writable argument. */
+        page = (struct spt_entry *) malloc (sizeof (struct spt_entry));
+        if (!page)
           return false;
+
+        page->writable = writable;
+        page->uaddr = upage;
+
+        if (page_zero_bytes == PGSIZE) {
+          page->entry_type = ZEROPAGE;
+        } else {
+          page->entry_type = FSYS;
+          page->file = file;
         }
         
-        /* Add the page to the process's address space. */
-        if (!install_page (upage, kpage, writable)) 
-        {
-          palloc_free_page (kpage);
-          return false; 
-        }     
-        
+        ASSERT (hash_insert (&thread_current()->spt, &page->spt_hash_elem) == NULL);
       } else {
-        
-        /* Check if writable flag for the page should be updated */
-        if(writable && !pagedir_is_writable(t->pagedir, upage)){
-          pagedir_set_writable(t->pagedir, upage, writable); 
-        }
-        
+        /* Otherwise, writable is set to true if any segment in the page is writable. */
+        page->writable |= writable;
       }
 
-      /* Load data into the page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes){
-        return false; 
-      }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
+      page->ofs = ofs;
+      page->read_bytes = page_read_bytes;
+      page->zero_bytes = page_zero_bytes;
+      page->in_memory = false;
+    
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
   return true;
@@ -805,14 +830,18 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  void *stack_pointer = ((uint8_t *) PHYS_BASE) - PGSIZE;
+
+  kpage = frame_table_get_frame (stack_pointer, PAL_USER | PAL_ZERO);
+  thread_current ()->stack_bottom = stack_pointer;
+
   if (kpage != NULL) 
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      success = install_page (stack_pointer, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
-        palloc_free_page (kpage);
+        frame_table_free_frame (kpage);
     }
   return success;
 }
@@ -851,6 +880,7 @@ process_add_file (struct file* file)
   int assigned_fd = pcb->next_fd++;
   pfile->fd = assigned_fd;
   pfile->file = file;
+  pfile->mapping = NULL;
 
   if (hash_insert (&pcb->files, &pfile->hash_elem))
     return -1;
@@ -860,7 +890,7 @@ process_add_file (struct file* file)
 
 /* Returns process_file struct associated with file descriptor fd in the current process's pcb or
    NULL if no file could be found. */
-static struct process_file *
+struct process_file *
 process_get_process_file (int fd)
 {
   struct process_control_block *pcb = process_get_pcb ();
@@ -918,4 +948,22 @@ process_file_hash (const struct hash_elem *elem, void *aux UNUSED)
   const struct process_file *pfile = hash_entry (elem, struct process_file, hash_elem);
 
   return hash_int (pfile->fd);
+}
+
+/* Sets the mapping field of a pcb's process_file. */
+bool
+process_file_set_mapping (struct process_file *pfile, struct spt_entry *spt) {
+  if (pfile == NULL)
+    return false;
+
+  pfile->mapping = spt;
+  return true;
+}
+
+struct spt_entry *
+process_file_get_mapping (struct process_file *pfile) {
+  if (pfile == NULL)
+    return NULL;
+
+  return pfile->mapping;
 }

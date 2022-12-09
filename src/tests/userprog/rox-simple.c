@@ -1,5 +1,4 @@
-/* Ensure that the executable of a running process cannot be
-   modified. */
+/* Ensure that the executable of a running process cannot be modified. */
 
 #include <syscall.h>
 #include "tests/lib.h"

@@ -13,14 +13,17 @@
 #include "hash.h"
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
+#include "vm/mmap.h"
+#include "vm/page.h"
 
-/* There are 13 syscalls in task two. */
-#define N_SYSCALLS 13
+/* There are 15 syscalls in tasks two and three. */
+#define N_SYSCALLS 15
 #define MAX_CONSOLE_BUFFER_OUTPUT 250
 #define MIN(x, y) ((x <= y) ? x : y)
 
 static void syscall_handler (struct intr_frame *);
 static bool is_valid_user_ptr (void *uaddr);
+static bool is_writable_page (void *uaddr);
 static void get_args (void *esp, void *args[], int num_args);
 static void validate_args (void *args[], int argc);
 
@@ -40,6 +43,8 @@ static uint32_t write_handler (void *args[]);
 static uint32_t seek_handler (void *args[]);
 static uint32_t tell_handler (void *args[]);
 static uint32_t close_handler (void *args[]);
+static uint32_t mmap_handler (void *args[]);
+static uint32_t munmap_handler (void *args[]);
 
 /* Map from system call number to the corresponding handler. We also
    provide the expected argument count (used to validate arguments later on). */
@@ -57,6 +62,8 @@ static const struct syscall syscall_ptrs[] = {
   {.handler = &seek_handler, .argc = 2},
   {.handler = &tell_handler, .argc = 1},
   {.handler = &close_handler, .argc = 1},
+  {.handler = &mmap_handler, .argc = 2},
+  {.handler = &munmap_handler, .argc = 1},
 };
 
 void
@@ -86,7 +93,7 @@ syscall_handler (struct intr_frame *f)
        
        If any of the arguments fail validation, we exit the user program. */
     validate_args (args, syscall.argc);
-    
+
     /* Make call to corresponding system call handler and put the return value 
        in the eax register. It's okay to do this even when we don't expect a return
        value because nothing else will inspect/require the contents of the eax register. */
@@ -124,7 +131,14 @@ get_args (void *esp, void *args[], int num_args)
 static bool 
 is_valid_user_ptr (void *uaddr)
 {
-  return (uaddr) && is_user_vaddr (uaddr) && pagedir_get_page (thread_current ()->pagedir, uaddr);
+  return (uaddr) && is_user_vaddr (uaddr);
+}
+
+static bool
+is_writable_page (void *uaddr)
+{
+  struct spt_entry *entry = get_spt_entry_by_uaddr (pg_round_down (uaddr));
+  return entry && entry->writable;
 }
 
 /* Every argument that the uses passes is a pointer - this function
@@ -259,6 +273,7 @@ open_handler (void *args[])
   }
 
   int fd = process_add_file (opened_file);
+  
   if (fd < 0) {
     file_close (opened_file);
     lock_release (&fs_lock);
@@ -300,7 +315,11 @@ read_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!is_valid_user_ptr ((char *) *buffer))
+  if (!is_valid_user_ptr ((char *) *buffer) && !is_writable_page((char *) *buffer))
+    exit_failure ();
+
+  struct spt_entry *entry = get_spt_entry_by_uaddr (pg_round_down ((char *) *buffer));
+  if (entry && !entry->writable)
     exit_failure ();
 
   switch (*fd) {
@@ -337,7 +356,7 @@ write_handler (void *args[])
   assert_valid_fd (*fd);
 
   /* Verify that we can dereference the buffer. */
-  if (!is_valid_user_ptr ((char *) *buffer))
+  if (!is_valid_user_ptr ((char *) *buffer) && !is_writable_page((char *) *buffer))
     exit_failure ();
 
   switch (*fd) {
@@ -412,5 +431,24 @@ close_handler (void *args[])
     exit_failure ();
 
   process_remove_file (*fd);
+  return 0;
+}
+
+static uint32_t
+mmap_handler (void *args[])
+{
+  int *fd = args[0];
+  assert_fd_greater_than (*fd, 1);
+
+  uint32_t *addr = args[1];
+
+  return (uint32_t) mmap_create (*fd, (void *) *addr);
+}
+
+static uint32_t
+munmap_handler (void *args[])
+{
+  int *mapping = args[0];
+  mmap_unmap (*mapping);
   return 0;
 }
