@@ -235,6 +235,25 @@ lock_release (struct lock *lock)
   sema_up (&lock->semaphore);
 }
 
+/* Acquires the lock and returns false if we did not already hold the lock,
+   but if we were already holding the lock, we return false. */
+bool
+reentrant_lock_acquire (struct lock *lock) {
+  if (lock_held_by_current_thread (lock)) 
+    return false;
+  
+  lock_acquire (lock);
+  return true;
+}
+
+/* Release the lock if we had not already acquired it when calling
+   reentrant lock acquire. */
+void
+reentrant_lock_release (struct lock *lock, bool should_release_lock) {
+  if (should_release_lock)
+    lock_release (lock);
+}
+
 /* Returns true if the current thread holds LOCK, false
    otherwise.  (Note that testing whether some other thread holds
    a lock would be racy.) */

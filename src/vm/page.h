@@ -6,14 +6,13 @@
 #include "filesys/off_t.h"
 #include "threads/synch.h"
 
-#define MAX_USER_STACK_SIZE 0x400000
+#define MAX_USER_STACK_SIZE 0x800000
 
 enum spt_entry_type
 {
     SWAP,
     FSYS,
     ZEROPAGE,
-    MMAP
 };
 
 struct spt_entry
@@ -30,6 +29,7 @@ struct spt_entry
         uint32_t read_bytes;
         uint32_t zero_bytes;
     };
+    bool in_memory;
     size_t swap_slot;
     struct hash_elem spt_hash_elem;
 };

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "filesys/file.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -64,6 +65,7 @@ mmap_create (int fd, void *uaddr)
         uint32_t map_bytes = left_to_map < PGSIZE ? left_to_map : PGSIZE;
         page->read_bytes = map_bytes;
         page->zero_bytes = PGSIZE - map_bytes;
+        page->in_memory = false;
 
         ASSERT (hash_insert (&thread_current()->spt, &page->spt_hash_elem) == NULL);
 
@@ -77,8 +79,6 @@ mmap_create (int fd, void *uaddr)
 void 
 mmap_unmap(mapid_t mapping)
 {
-    // Do we need to exit_failure() if the mapping doesn't exist?
-    // If we do, maybe this needs to be done in the syscall handler before we call this function
     struct process_file *pfile = process_get_process_file(mapping);
     mmap_writeback(pfile);
     process_file_set_mapping(pfile, NULL);
@@ -108,9 +108,9 @@ mmap_writeback(struct process_file *pfile)
         /* If page has been written to, write its data back to the original file struct. */
         if (pagedir_is_dirty(thread_current()->pagedir, page->uaddr))
         {
-            bool should_release_lock = safe_acquire_fs_lock ();
+            bool should_release_lock = reentrant_lock_acquire (&fs_lock);
             file_write_at (page->file, page->uaddr, PGSIZE, page->ofs);
-            safe_release_fs_lock (should_release_lock);
+            reentrant_lock_release (&fs_lock, should_release_lock);
         }
 
         uaddr += PGSIZE;

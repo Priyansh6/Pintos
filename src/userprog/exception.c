@@ -174,5 +174,10 @@ page_fault (struct intr_frame *f)
 static bool
 is_stack_access (void *fault_addr, void *esp)
 {
-   return fault_addr == esp || fault_addr + 4 == esp || fault_addr + 32 == esp;
+   return get_spt_entry_by_uaddr (pg_round_down (fault_addr)) == NULL
+         && fault_addr >= (PHYS_BASE - MAX_USER_STACK_SIZE)
+         && fault_addr < PHYS_BASE
+         && (fault_addr + 4 == esp
+            ||  fault_addr + 32 == esp
+            || fault_addr >= esp);
 }

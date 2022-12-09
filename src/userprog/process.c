@@ -173,9 +173,9 @@ static void
 process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
 {
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
-  bool should_release = safe_acquire_fs_lock ();
+  bool should_release = reentrant_lock_acquire (&fs_lock);
   file_close (pfile->file);
-  safe_release_fs_lock (should_release);
+  reentrant_lock_release (&fs_lock, should_release);
   free (pfile);
 }
 
@@ -476,9 +476,11 @@ process_exit (void)
   struct process_control_block *parent_pcb = process_get_pcb ()->parent_pcb;
 
   /* Allow any parent process waiting on our process to continue. */
+  enum intr_level old_level = intr_disable ();
   sema_up (&pcb->wait_sema);
   if (parent_pcb == NULL || parent_pcb->has_exited)
     free (pcb);
+  intr_set_level (old_level);
     
 }
 
@@ -809,6 +811,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       page->ofs = ofs;
       page->read_bytes = page_read_bytes;
       page->zero_bytes = page_zero_bytes;
+      page->in_memory = false;
     
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -827,11 +830,14 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = frame_table_get_frame (((uint8_t *) PHYS_BASE) - PGSIZE, PAL_USER | PAL_ZERO);
+  void *stack_pointer = ((uint8_t *) PHYS_BASE) - PGSIZE;
+
+  kpage = frame_table_get_frame (stack_pointer, PAL_USER | PAL_ZERO);
+  thread_current ()->stack_bottom = stack_pointer;
 
   if (kpage != NULL) 
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      success = install_page (stack_pointer, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else

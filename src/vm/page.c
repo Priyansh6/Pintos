@@ -38,10 +38,11 @@ handle_user_page_fault (void *fault_addr)
     case SWAP:
         kpage = load_page_from_swap (entry);
         break;
-    case MMAP:
     case FSYS:
-        if (load_shared_page (entry))
+        if (load_shared_page (entry)) {
+          entry->in_memory = true;
           return;
+        }
         kpage = load_page_from_filesys (entry);
         break;
     case ZEROPAGE:
@@ -53,15 +54,16 @@ handle_user_page_fault (void *fault_addr)
   if (kpage == NULL)
     PANIC ("Failed to load page from filesystem.\n");
 
+  entry->in_memory = true;
 }
 
 /* Loads a page in from swap into user address entry->uaddr. */
 static void * 
 load_page_from_swap (struct spt_entry *entry) 
 {
-  // Needs fixing
-  swap_in (entry->uaddr, entry->swap_slot);
-  return NULL;
+  void *kaddr = get_and_install_page (entry);
+  swap_in (kaddr, entry->swap_slot);
+  return kaddr;
 }
 
 /* Loads a file into a newly allocated page.
@@ -73,27 +75,27 @@ load_page_from_filesys (struct spt_entry *entry)
 {
   ASSERT (!intr_context ())
 
-  bool should_release_lock = safe_acquire_fs_lock ();
+  bool should_release_lock = reentrant_lock_acquire (&fs_lock);
 
   file_seek (entry->file, entry->ofs);
   
   void *kpage = get_and_install_page (entry);
 
   if (kpage == NULL) {
-    safe_release_fs_lock (should_release_lock);
+    reentrant_lock_release (&fs_lock, should_release_lock);
     return NULL; 
   }
 
   /* Load data into the page. */
   if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes) {
-    safe_release_fs_lock (should_release_lock);
+    reentrant_lock_release (&fs_lock, should_release_lock);
     return NULL; 
   }
 
   /* Fills the rest of the page with zeros. */
   memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
 
-  safe_release_fs_lock (should_release_lock);
+  reentrant_lock_release (&fs_lock, should_release_lock);
 
   if (!entry->writable)
     insert_shared_page (file_get_inode (entry->file), entry->ofs, kpage);
@@ -127,24 +129,33 @@ load_shared_page (struct spt_entry *entry)
     if (entry->writable)
         return false;
 
+    lock_acquire (&ft_lock);
     lock_acquire (&shared_table_lock);
+
     struct shared_file *shared_file = get_shared_file (file_get_inode (entry->file));
     struct shared_file_page *shared_page = get_shared_page (shared_file, entry->ofs);
 
     /* If the page can be shared and has already been placed in memory by another thread,
       then we can just update our page table to point to it. We also add ourselves as an
       owner of the frame. */
-    if (shared_file != NULL && shared_page != NULL) {
+    if (shared_file != NULL && shared_page != NULL && thread_current ()->pagedir != NULL) {
+
+        
         pagedir_set_page (thread_current ()->pagedir, shared_page->frame_entry->upage, shared_page->frame_entry->kpage, false);
 
         struct owner *owner = (struct owner *) malloc (sizeof (struct owner));
         ASSERT (owner != NULL);
         owner->thread = thread_current ();
         list_push_back (&shared_page->frame_entry->owners, &owner->elem);
+        
         lock_release (&shared_table_lock);
+        lock_release (&ft_lock);
         return true;
     }
+
     lock_release (&shared_table_lock);
+    lock_release (&ft_lock);
+
     return false;
 }
 
@@ -162,17 +173,24 @@ get_and_install_page (struct spt_entry *entry)
   
     /* Get a new page of memory. */
     kpage = frame_table_get_frame (entry->uaddr, PAL_USER);
-  
-    if (kpage == NULL)
+
+    if (kpage == NULL) {
       return NULL;
-  
+    }
+
+    struct frame_table_entry *fte = get_frame_by_kpage (kpage);
+    fte->pinned = true;
+
     /* Add the page to the process's address space. */
     if (pagedir_get_page (t->pagedir, entry->uaddr) != NULL
         || !pagedir_set_page (t->pagedir, entry->uaddr, kpage, entry->writable))
     {
+      fte->pinned = false;
       frame_table_free_frame (kpage);
       return NULL; 
     }
+
+    fte->pinned = false;
 
   } else {
     /* Check if writable flag for the page should be updated */
@@ -180,6 +198,8 @@ get_and_install_page (struct spt_entry *entry)
       pagedir_set_writable(t->pagedir, entry->uaddr, entry->writable); 
     }
   }
+
+  
 
   return kpage;
 }
@@ -190,18 +210,25 @@ get_and_install_page (struct spt_entry *entry)
 void
 stack_grow (void *fault_addr) 
 {
-  void *kpage = frame_table_get_frame (((uint8_t *) PHYS_BASE) - PGSIZE, PAL_USER | PAL_ZERO);
-  void *upage = pg_round_down (fault_addr);
   struct thread *t = thread_current ();
+  void *stack_bottom = t->stack_bottom;
+  while (stack_bottom > pg_round_down (fault_addr)) {
 
-  if (kpage != NULL) {
-      if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true))
-        return;
-      else
+    void *upage = stack_bottom - PGSIZE;
+    void *kpage = frame_table_get_frame (upage, PAL_USER | PAL_ZERO);
+
+    if (kpage != NULL) {
+        if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true)) {
+          stack_bottom -= PGSIZE;
+        } else {
+          frame_table_free_frame (kpage);
+          exit_failure ();
+        }
+    } else {
         exit_failure ();
-  } else {
-      exit_failure ();
+    }
   }
+  t->stack_bottom = stack_bottom;
 }
 
 /* Returns the supplemental page table entry given by uaddr. */
@@ -227,7 +254,7 @@ destroy_spt (void)
 void
 free_spt_entry (struct spt_entry *entry) 
 {
-  if (entry->entry_type == SWAP)
+  if (entry->entry_type == SWAP && !entry->in_memory)
     swap_clear (entry->swap_slot);
   free (entry);
 }

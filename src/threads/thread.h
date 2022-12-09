@@ -99,6 +99,7 @@ struct thread
     uint32_t *pagedir;                  /* Page directory. */
     struct process_control_block *pcb;  /* Pointer to the thread's process control block. */
     struct hash spt;                    /* Supplemental page table for the thread. */
+    void *stack_bottom;                 /* Pointer to the bottom of the process' stack. */
 #endif
 
     /* Owned by thread.c. */
