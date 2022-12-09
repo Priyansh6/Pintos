@@ -15,11 +15,11 @@ static bool frame_less (const struct hash_elem *a, const struct hash_elem *b, vo
 static unsigned frame_hash_func (const struct hash_elem *elem, void *aux UNUSED);
 static void free_frame_elem (struct frame_table_entry *fte);
 static void hash_free_frame_elem (struct hash_elem *e, void *aux UNUSED);
-static struct frame_table_entry *choose_victim (void);
 static void remove_and_invalidate_owners (struct frame_table_entry *fte);
 static struct spt_entry *prepare_spt_entry_for_eviction (void *uaddr);
 static void evict_page (struct spt_entry *page, void *kpage);
 
+static struct frame_table_entry *choose_victim (void);
 static bool any_owner_accessed (struct frame_table_entry *fte);
 static void set_owners_not_accessed (struct frame_table_entry *fte);
 
@@ -292,30 +292,6 @@ get_frame_by_kpage (void *kpage)
   return e == NULL ? NULL : hash_entry (e, struct frame_table_entry, frame_hash_elem);
 }
 
-static int frame_to_evict = 0;
-
-/* Iterates through frame_table and chooses frame to evict. */
-static struct frame_table_entry *
-choose_victim_random (void) 
-{
-  
-  frame_to_evict = frame_to_evict % hash_size (&frame_table);
-  
-  int c = 0;
-  struct hash_iterator i;
-
-  hash_first (&i, &frame_table);
-  while (hash_next (&i))
-    {
-      c++;
-      struct frame_table_entry *f = hash_entry (hash_cur (&i), struct frame_table_entry, frame_hash_elem);
-      if (frame_to_evict == c || c == (int) hash_size (&frame_table)) {
-        frame_to_evict++;
-        return f;
-      }
-    }
-  return NULL;
-}
 /* Sets all owner threads for a frame table entry to not accessed. */
 static void
 set_owners_not_accessed (struct frame_table_entry *fte)
@@ -348,38 +324,42 @@ any_owner_accessed (struct frame_table_entry *fte)
 }
 
 /* Second Chance Algorithm for finding a frame to evict. */
+static struct hash_iterator RR_frame_index;
+
 static struct frame_table_entry *
 choose_victim (void) 
 {
-  while (true) {
-    struct hash_iterator RR_frame_index;
+  /* Setting the hash iterator to the beginning of the hash table when the iterator has not been initialised. */
+  if (RR_frame_index.hash == NULL)
+    hash_first(&RR_frame_index, &frame_table);
 
+  while (true) 
+  {
     bool everything_pinned = true;
 
-    /* Setting the hash iterator to the beginning of the hash table when the iterator has not been initialised. */
-    hash_first (&RR_frame_index, &frame_table);
     /* Infinitely looping until we find a frame to evict. */
     while (hash_next (&RR_frame_index))
     {
-      /* If we are at the end of the frame table and we havent found a frame to evict, loop back to the start. */
-
-
       struct frame_table_entry *f = hash_entry (hash_cur (&RR_frame_index), struct frame_table_entry, frame_hash_elem);
 
       /* Check if this frame f has been accessed by any of its owners. If it has been accessed, set the accessed bits to 
         false and move on. Otherwise, we have found our frame to evict so we return it, breaking out the loop.  */
-      if (!any_owner_accessed(f) && !f->pinned) {
+      if (!f->pinned && !any_owner_accessed(f)) {
         return f;
       }
       set_owners_not_accessed(f);
+
       everything_pinned &= f->pinned; 
     }
+    /* If all frames are pinned, we yield, in hopes that in the future some frames will be unpinned. */
     if (everything_pinned) {
       lock_release(&ft_lock);
       thread_yield();
       lock_acquire(&ft_lock);
     }
-  
+
+    /* If we are at the end of the frame table and we havent found a frame to evict, loop back to the start. */
+    hash_first (&RR_frame_index, &frame_table);
   }
 
   /* Should never get here. */
