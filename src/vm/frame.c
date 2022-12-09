@@ -154,6 +154,7 @@ frame_table_free_frame (void *kaddr)
   hash_delete (&frame_table, e);
 
   /* Free all owners of the page. */
+  ASSERT (list_size (&fte->owners) == 1);
   while (!list_empty (&fte->owners)) {
     free (list_entry (list_pop_front (&fte->owners), struct owner, elem));
   }
@@ -340,7 +341,7 @@ any_owner_accessed (struct frame_table_entry *fte)
   {
     struct owner *o = list_entry (e, struct owner, elem);
 
-    if (pagedir_is_accessed(o->thread->pagedir, fte->upage)) {
+    if (o->thread->pagedir != NULL && pagedir_is_accessed(o->thread->pagedir, fte->upage)) {
       //printf("owner has been accessed\n");
       return true;
     }

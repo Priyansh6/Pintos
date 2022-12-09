@@ -129,24 +129,33 @@ load_shared_page (struct spt_entry *entry)
     if (entry->writable)
         return false;
 
+    lock_acquire (&ft_lock);
     lock_acquire (&shared_table_lock);
+
     struct shared_file *shared_file = get_shared_file (file_get_inode (entry->file));
     struct shared_file_page *shared_page = get_shared_page (shared_file, entry->ofs);
 
     /* If the page can be shared and has already been placed in memory by another thread,
       then we can just update our page table to point to it. We also add ourselves as an
       owner of the frame. */
-    if (shared_file != NULL && shared_page != NULL) {
+    if (shared_file != NULL && shared_page != NULL && thread_current ()->pagedir != NULL) {
+
+        
         pagedir_set_page (thread_current ()->pagedir, shared_page->frame_entry->upage, shared_page->frame_entry->kpage, false);
 
         struct owner *owner = (struct owner *) malloc (sizeof (struct owner));
         ASSERT (owner != NULL);
         owner->thread = thread_current ();
         list_push_back (&shared_page->frame_entry->owners, &owner->elem);
+        
         lock_release (&shared_table_lock);
+        lock_release (&ft_lock);
         return true;
     }
+
     lock_release (&shared_table_lock);
+    lock_release (&ft_lock);
+
     return false;
 }
 
