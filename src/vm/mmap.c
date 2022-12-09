@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "filesys/file.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -54,10 +55,10 @@ mmap_create (int fd, void *uaddr)
             process_file_set_mapping (pfile, page);
         }
 
-        page->writable = true; // this seems okay for now, maybe we will need to make this dependent on a file's deny_write field
+        page->writable = true; 
         page->uaddr = uaddr + PGSIZE * i;
         page->entry_type = FSYS;
-        page->file = file_reopen (file); // Not sure if we should just file reopen once (don't think we should)
+        page->file = file_reopen (file);
         page->ofs = PGSIZE * i;
 
         uint32_t map_bytes = left_to_map < PGSIZE ? left_to_map : PGSIZE;
@@ -77,8 +78,6 @@ mmap_create (int fd, void *uaddr)
 void 
 mmap_unmap(mapid_t mapping)
 {
-    // Do we need to exit_failure() if the mapping doesn't exist?
-    // If we do, maybe this needs to be done in the syscall handler before we call this function
     struct process_file *pfile = process_get_process_file(mapping);
     mmap_writeback(pfile);
     process_file_set_mapping(pfile, NULL);
@@ -108,9 +107,9 @@ mmap_writeback(struct process_file *pfile)
         /* If page has been written to, write its data back to the original file struct. */
         if (pagedir_is_dirty(thread_current()->pagedir, page->uaddr))
         {
-            bool should_release_lock = safe_acquire_fs_lock ();
+            bool should_release_lock = reentrant_lock_acquire (&fs_lock);
             file_write_at (page->file, page->uaddr, PGSIZE, page->ofs);
-            safe_release_fs_lock (should_release_lock);
+            reentrant_lock_release (&fs_lock, should_release_lock);
         }
 
         uaddr += PGSIZE;

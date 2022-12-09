@@ -452,28 +452,3 @@ munmap_handler (void *args[])
   mmap_unmap (*mapping);
   return 0;
 }
-
-/* Acquires the filesystem lock if we do not already hold it. 
-   
-   If we have already acquired the lock, then we keep track
-   of this in the should_release_lock variable which is used
-   later to determine when we should release the lock (i.e if
-   we had already acquired it before calling this function, we 
-   don't want to release it ourselves as our caller will do it 
-   for us). */
-bool
-safe_acquire_fs_lock (void) {
-  if (lock_held_by_current_thread (&fs_lock)) 
-    return false;
-  
-  lock_acquire (&fs_lock);
-  return true;
-}
-
-/* Releases the file system lock if we were not holding it
-   before we loaded a page from the filesystem. */
-void
-safe_release_fs_lock (bool should_release_lock) {
-  if (should_release_lock)
-    lock_release (&fs_lock);
-}

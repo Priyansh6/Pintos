@@ -325,9 +325,7 @@ set_owners_not_accessed (struct frame_table_entry *fte)
   for (e = list_begin (&fte->owners); e != list_end (&fte->owners); e = list_next (e))
   {
     struct owner *o = list_entry (e, struct owner, elem);
-    //printf("accessed before: %d\n", pagedir_is_accessed(o->thread->pagedir, fte->upage));
     pagedir_set_accessed(o->thread->pagedir, fte->upage, false);
-    //printf("accessed after: %d\n", pagedir_is_accessed(o->thread->pagedir, fte->upage));
   }
 }
 
@@ -342,12 +340,10 @@ any_owner_accessed (struct frame_table_entry *fte)
     struct owner *o = list_entry (e, struct owner, elem);
 
     if (o->thread->pagedir != NULL && pagedir_is_accessed(o->thread->pagedir, fte->upage)) {
-      //printf("owner has been accessed\n");
       return true;
     }
   }
 
-  //printf("owner has NOT been accessed\n");
   return false;
 }
 

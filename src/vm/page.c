@@ -75,27 +75,27 @@ load_page_from_filesys (struct spt_entry *entry)
 {
   ASSERT (!intr_context ())
 
-  bool should_release_lock = safe_acquire_fs_lock ();
+  bool should_release_lock = reentrant_lock_acquire (&fs_lock);
 
   file_seek (entry->file, entry->ofs);
   
   void *kpage = get_and_install_page (entry);
 
   if (kpage == NULL) {
-    safe_release_fs_lock (should_release_lock);
+    reentrant_lock_release (&fs_lock, should_release_lock);
     return NULL; 
   }
 
   /* Load data into the page. */
   if (file_read (entry->file, kpage, entry->read_bytes) != (int) entry->read_bytes) {
-    safe_release_fs_lock (should_release_lock);
+    reentrant_lock_release (&fs_lock, should_release_lock);
     return NULL; 
   }
 
   /* Fills the rest of the page with zeros. */
   memset (kpage + entry->read_bytes, 0, entry->zero_bytes);
 
-  safe_release_fs_lock (should_release_lock);
+  reentrant_lock_release (&fs_lock, should_release_lock);
 
   if (!entry->writable)
     insert_shared_page (file_get_inode (entry->file), entry->ofs, kpage);
@@ -221,6 +221,7 @@ stack_grow (void *fault_addr)
         if (pagedir_get_page (t->pagedir, upage) == NULL && pagedir_set_page (t->pagedir, upage, kpage, true)) {
           stack_bottom -= PGSIZE;
         } else {
+          frame_table_free_frame (kpage);
           exit_failure ();
         }
     } else {

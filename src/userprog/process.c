@@ -173,9 +173,9 @@ static void
 process_file_hash_close (struct hash_elem *e, void *aux UNUSED)
 {
   struct process_file *pfile = hash_entry (e, struct process_file, hash_elem);
-  bool should_release = safe_acquire_fs_lock ();
+  bool should_release = reentrant_lock_acquire (&fs_lock);
   file_close (pfile->file);
-  safe_release_fs_lock (should_release);
+  reentrant_lock_release (&fs_lock, should_release);
   free (pfile);
 }
 

@@ -14,7 +14,4 @@ struct lock fs_lock;
 void syscall_init (void);
 void exit_failure (void);
 
-bool safe_acquire_fs_lock (void);
-void safe_release_fs_lock (bool should_release_lock);
-
 #endif /* userprog/syscall.h */
